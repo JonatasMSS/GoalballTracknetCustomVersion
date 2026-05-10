@@ -59,53 +59,43 @@ def train(model, train_loader, optimizer, device, epoch, max_iters=200):
     return np.mean(losses)
 
 
-def validate(model, val_loader, device, epoch,min_dist=5):
-    losses = []
-    tp = [0,0] # [TP para vis=0, TP para vis=1]
-    tn = [0,0] # [TN para vis=0, TN para vis=1]
-    fp = [0,0] # [FP para vis=0, FP para vis=1] 
-    fn = [0,0] # [FN para vis=0, FN para vis=1]
-    eps_dist = min_dist  # 2px de distância
-    criterion = nn.CrossEntropyLoss()
 
+def validate(model, val_loader, device, epoch, min_dist=5):
+    losses = []
+    tp = [0, 0, 0, 0]
+    fp = [0, 0, 0, 0]
+    tn = [0, 0, 0, 0]
+    fn = [0, 0, 0, 0]
+    criterion = nn.CrossEntropyLoss()
     model.eval()
     for iter_id, batch in enumerate(val_loader):
         with torch.no_grad():
-            if type(batch[0]) == str:
-                print(f"Batch {iter_id} is a string, skipping...")
-                continue
-        
             out = model(batch[0].float().to(device))
-            gt = batch[1].long().to(device)
+            gt = torch.tensor(batch[1], dtype=torch.long, device=device)
             loss = criterion(out, gt)
-
             losses.append(loss.item())
-            
-
+            # metrics
             output = out.argmax(dim=1).detach().cpu().numpy()
-            gt = gt.detach().cpu().numpy()
-
             for i in range(len(output)):
                 x_pred, y_pred = postprocess(output[i])
                 x_gt = batch[2][i]
                 y_gt = batch[3][i]
                 vis = batch[4][i]
-
                 if x_pred:
-                    if vis != 0: # Detectou e GT é 1
+                    if vis != 0:
                         dst = distance.euclidean((x_pred, y_pred), (x_gt, y_gt))
-                        if dst < eps_dist: # Está dentro da distância aceitável
+                        if dst < min_dist:
                             tp[vis] += 1
                         else:
                             fp[vis] += 1
-                    else: # Detectou mas GT é 0
+                    else:        
                         fp[vis] += 1
                 if not x_pred:
-                    if vis != 0: # Não detectou mas GT é 1
+                    if vis != 0:
                         fn[vis] += 1
-                    else: # Não detectou e GT é 0
+                    else:
                         tn[vis] += 1
-                print('val | epoch = {}, iter = [{}|{}], loss = {}, tp = {}, tn = {}, fp = {}, fn = {} '.format(epoch,
+            print('val | epoch = {}, iter = [{}|{}], loss = {}, tp = {}, tn = {}, fp = {}, fn = {} '.format(epoch,
                                                                                                             iter_id,
                                                                                                             len(val_loader),
                                                                                                             round(np.mean(losses), 6),
@@ -113,16 +103,84 @@ def validate(model, val_loader, device, epoch,min_dist=5):
                                                                                                             sum(tn),
                                                                                                             sum(fp),
                                                                                                             sum(fn)))
-                eps = 1e-15
-                precision = sum(tp) / (sum(tp) + sum(fp) + eps)
-                vc1 = tp[1] + fp[1] + tn[1] + fn[1]
-                recall = sum(tp) / (vc1 + eps)
-                f1 = 2 * precision * recall / (precision + recall + eps)
-                print('precision = {}'.format(precision))
-                print('recall = {}'.format(recall))
-                print('f1 = {}'.format(f1))
+    eps = 1e-15
+    precision = sum(tp) / (sum(tp) + sum(fp) + eps)
+    vc1 = tp[1] + fp[1] + tn[1] + fn[1]
+    vc2 = tp[2] + fp[2] + tn[2] + fn[2]
+    vc3 = tp[3] + fp[3] + tn[3] + fn[3]
+    recall = sum(tp) / (vc1 + vc2 + vc3 + eps)
+    f1 = 2 * precision * recall / (precision + recall + eps)
+    print('precision = {}'.format(precision))
+    print('recall = {}'.format(recall))
+    print('f1 = {}'.format(f1))
 
-                return np.mean(losses), precision, recall, f1
+    return np.mean(losses), precision, recall, f1
+
+
+# def validate(model, val_loader, device, epoch,min_dist=5):
+#     losses = []
+#     tp = [0,0] # [TP para vis=0, TP para vis=1]
+#     tn = [0,0] # [TN para vis=0, TN para vis=1]
+#     fp = [0,0] # [FP para vis=0, FP para vis=1] 
+#     fn = [0,0] # [FN para vis=0, FN para vis=1]
+#     eps_dist = min_dist  # 2px de distância
+#     criterion = nn.CrossEntropyLoss()
+
+#     model.eval()
+#     for iter_id, batch in enumerate(val_loader):
+#         with torch.no_grad():
+#             if type(batch[0]) == str:
+#                 print(f"Batch {iter_id} is a string, skipping...")
+#                 continue
+        
+#             out = model(batch[0].float().to(device))
+#             gt = batch[1].long().to(device)
+#             loss = criterion(out, gt)
+
+#             losses.append(loss.item())
+            
+
+#             output = out.argmax(dim=1).detach().cpu().numpy()
+#             gt = gt.detach().cpu().numpy()
+
+#             for i in range(len(output)):
+#                 x_pred, y_pred = postprocess(output[i])
+#                 x_gt = batch[2][i]
+#                 y_gt = batch[3][i]
+#                 vis = batch[4][i]
+
+#                 if x_pred:
+#                     if vis != 0: # Detectou e GT é 1
+#                         dst = distance.euclidean((x_pred, y_pred), (x_gt, y_gt))
+#                         if dst < eps_dist: # Está dentro da distância aceitável
+#                             tp[vis] += 1
+#                         else:
+#                             fp[vis] += 1
+#                     else: # Detectou mas GT é 0
+#                         fp[vis] += 1
+#                 if not x_pred:
+#                     if vis != 0: # Não detectou mas GT é 1
+#                         fn[vis] += 1
+#                     else: # Não detectou e GT é 0
+#                         tn[vis] += 1
+#                 print('val | epoch = {}, iter = [{}|{}], loss = {}, tp = {}, tn = {}, fp = {}, fn = {} '.format(epoch,
+#                                                                                                             iter_id,
+#                                                                                                             len(val_loader),
+#                                                                                                             round(np.mean(losses), 6),
+#                                                                                                             sum(tp),
+#                                                                                                             sum(tn),
+#                                                                                                             sum(fp),
+#                                                                                                             sum(fn)))
+#                 eps = 1e-15
+#                 precision = sum(tp) / (sum(tp) + sum(fp) + eps)
+#                 vc1 = tp[1] + fp[1] + tn[1] + fn[1]
+#                 recall = sum(tp) / (vc1 + eps)
+#                 f1 = 2 * precision * recall / (precision + recall + eps)
+#                 print('precision = {}'.format(precision))
+#                 print('recall = {}'.format(recall))
+#                 print('f1 = {}'.format(f1))
+
+#                 return np.mean(losses), precision, recall, f1
             
         
             
