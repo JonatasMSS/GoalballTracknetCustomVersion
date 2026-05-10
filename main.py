@@ -17,9 +17,11 @@ if __name__ == '__main__':
     parser.add_argument('--val_intervals', type=int, default=2, help='number of epochs to run validation')
     parser.add_argument('--steps_per_epoch', type=int, default=200, help='number of steps per one epoch')
     parser.add_argument('--exps_path', type=str, default='exps', help='path to save results')
+    parser.add_argument('--dataset_path', type=str, default='assets/dataset', help='path to dataset')
+    parser.add_argument('--model_path', type=str, default=None, help='path to model checkpoint')
     args = parser.parse_args()
     
-    dataset = TracknetV1Dataset(frames_path="assets/dataset/frames_out", gts_path="assets/dataset/gts", labels_path="assets/dataset/labels")
+    dataset = TracknetV1Dataset(frames_path=os.path.join(args.dataset_path, "frames_out"), gts_path=os.path.join(args.dataset_path, "gts"), labels_path=os.path.join(args.dataset_path, "labels"))
     train_size = int(0.8 * len(dataset))
     val_size = len(dataset) - train_size
     train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
@@ -30,6 +32,11 @@ if __name__ == '__main__':
     model = BallTrackerNet()
     device = 'cuda'
     model = model.to(device)
+
+    if args.model_path is not None:
+        model.load_state_dict(torch.load(args.model_path, map_location=device))
+        print(f"Model loaded from {args.model_path}")
+
     
     exps_path = os.path.join(args.exps_path, args.exp_id)
     tb_path = os.path.join(exps_path, 'plots')
