@@ -36,7 +36,7 @@ def train(model, train_loader, optimizer, device, epoch, max_iters=200):
     return np.mean(losses)
 
 
-def validate(model, epoch, val_loader, device, min_dist=2):
+def validate(model, epoch, val_loader, device, min_dist=5):
     losses = []
     tp = [0,0] # [TP para vis=0, TP para vis=1]
     tn = [0,0] # [TN para vis=0, TN para vis=1]
@@ -48,6 +48,10 @@ def validate(model, epoch, val_loader, device, min_dist=2):
     model.eval()
     for iter_id, batch in enumerate(val_loader):
         with torch.no_grad():
+            if type(batch[0]) == str:
+                print(f"Batch {iter_id} is a string, skipping...")
+                continue
+        
             out = model(batch[0].float().to(device))
             gt = batch[1].long().to(device)
             loss = criterion(out, gt)
