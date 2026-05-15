@@ -89,13 +89,13 @@ if __name__ == '__main__':
     best_f1_score = 0.0
 
     for epoch in range(num_epochs):
-        train_loss = train(model, train_loader, optimizer, device, epoch, loss_function)
+        train_loss = train(model, train_loader, loss_function,optimizer, device)
 
         writer.add_scalar('Loss/Train', train_loss, epoch)
 
         print(f"Epoch {epoch+1}/{num_epochs} - Train Loss: {train_loss:.4f}")
         if epoch > 0 and epoch % epochs_to_validate == 0:
-            val_loss,precision, recall, f1  = validate(model, val_loader, device, epoch, loss_function,writer=writer,epoch=epoch)
+            val_loss,precision, recall, f1  = validate(model, val_loader, loss_function,device, writer=writer, epoch=epoch)
             writer.add_scalar('Loss/Validation', val_loss, epoch)
             writer.add_scalar('Metrics/Precision', precision, epoch)
             writer.add_scalar('Metrics/Recall', recall, epoch)

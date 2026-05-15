@@ -1,7 +1,7 @@
 import torch
 
 
-def wbce_loss(predictions, targets, pos_weight=10.0, neg_weight=0.5):
+def wbce_loss(predictions, targets, pos_weight=800, neg_weight=0.5):
     predictions = torch.clamp(predictions, 1e-7, 1 - 1e-7)
     
     loss = -pos_weight * targets * torch.log(predictions) - \
