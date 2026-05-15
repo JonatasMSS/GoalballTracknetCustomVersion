@@ -41,7 +41,7 @@ def postprocess(feature_map):
             y = circles[0][0][1]
     return x, y   
 
-def validate(model, val_loader, criterion, device):
+def validate(model, val_loader, criterion, device, writer=None, epoch=None):
     model.eval()
     val_loss = []
     tp = [0,0]
@@ -58,6 +58,10 @@ def validate(model, val_loader, criterion, device):
             outputs = model(inputs)
             loss = criterion(outputs, targets)
             val_loss.append(loss.item())
+
+            imgs_to_writer = torch.cat([targets, outputs], dim=0)  # Concatena inputs, targets e outputs para visualização
+
+            writer.add_images('Target_Outputs/Val', imgs_to_writer, epoch, dataformats='NCHW')
             
             for img_idx in range(outputs.size(0)):
                 img_to_show = outputs[img_idx]
@@ -88,7 +92,7 @@ def validate(model, val_loader, criterion, device):
         precision = tp[1] / (tp[1] + fp[1] + eps)        
         recall = tp[1] / (tp[1] + fn[1] + eps)
         f1_score = 2 * (precision * recall) / (precision + recall + eps)  
-        print(f"TP:{tp[0]} FP:{fp[0]} TN:{tn[0]} FN:{fn[0]} TP:{tp[1]} FP:{fp[1]} TN:{tn[1]} FN:{fn[1]}")
+        
         avg_val_loss = sum(val_loss) / len(val_loss)
 
 
