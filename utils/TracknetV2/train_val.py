@@ -57,6 +57,8 @@ def validate(model, val_loader, criterion, device, writer=None, epoch=None):
 
             outputs = model(inputs)
             loss = criterion(outputs, targets)
+
+            print(f"Validation Batch Loss: {loss.item():.4f}")
             val_loss.append(loss.item())
 
             imgs_to_writer = torch.cat([targets, outputs], dim=0)  # Concatena inputs, targets e outputs para visualização
@@ -87,7 +89,8 @@ def validate(model, val_loader, criterion, device, writer=None, epoch=None):
                         fn[visibility] += 1  # False Negative
                     else:
                         tn[visibility] += 1  # True Negative (ball not visible and not detected)
-    
+
+        print(f"TP (Visible): {tp[1]}, FP (Visible): {fp[1]}, TN (Not Visible): {tn[0]}, FN (Visible): {fn[1]}")
         eps = 1e-6
         precision = tp[1] / (tp[1] + fp[1] + eps)        
         recall = tp[1] / (tp[1] + fn[1] + eps)
