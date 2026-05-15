@@ -37,12 +37,20 @@ if __name__ == '__main__':
     dataset_dir = args.dataset_path
 
 
+    if not os.path.exists(logs_dir):
+        print(f"Criando diretório para logs: {logs_dir}")
+        os.makedirs(logs_dir)
+    if not os.path.exists(weights_dir):
+        print(f"Criando diretório para pesos: {weights_dir}")
+        os.makedirs(weights_dir)
+    
+
+
     best_model_path = os.path.join(weights_dir, 'best_model.pth')
     last_model_path = os.path.join(weights_dir, 'last_model.pth')
-
-    #Model Config
-    writer = SummaryWriter(logs_dir)
     model = TrackNet().to(device)
+
+    
 
 
     if args.model_path is not None:
@@ -54,6 +62,9 @@ if __name__ == '__main__':
         model = torch.nn.DataParallel(model)
     
 
+    #Model Config
+    writer = SummaryWriter(logs_dir)
+
 
     loss_function = wbce_loss
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-5)
@@ -61,12 +72,6 @@ if __name__ == '__main__':
 
 
 
-    if not os.path.exists(logs_dir):
-        print(f"Criando diretório para logs: {logs_dir}")
-        os.makedirs(logs_dir)
-    if not os.path.exists(weights_dir):
-        print(f"Criando diretório para pesos: {weights_dir}")
-        os.makedirs(weights_dir)
     
     
 
