@@ -42,16 +42,23 @@ def postprocess(feature_map, original_width, original_height):
 
 def main():
     parser = argparse.ArgumentParser(description="Run TrackNetV1 inference on a video.")
-    parser.add_argument('--video_path', type=str, required=True, help='Path to the input video.')
+    parser.add_argument('--video_paths', nargs='+', type=str, required=True, help='Path to one or more input videos (max 4).')
     parser.add_argument('--model_path', type=str, required=True, help='Path to the trained model (.pt file).')
     parser.add_argument('--output_path', type=str, default='output.mp4', help='Path to save the output video.')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu', help='Device to run inference on (cuda/cpu).')
     parser.add_argument('--trail_length', type=int, default=7, help='Length of the ball trajectory trail.')
+    parser.add_argument('--max_seconds', type=float, default=None, help='Maximum number of seconds to process.')
     args = parser.parse_args()
 
-    if not os.path.exists(args.video_path):
-        print(f"Error: Input video '{args.video_path}' not found.")
+    num_videos = len(args.video_paths)
+    if num_videos < 1 or num_videos > 4:
+        print("Error: Please provide between 1 and 4 video paths.")
         return
+
+    for vp in args.video_paths:
+        if not os.path.exists(vp):
+            print(f"Error: Input video '{vp}' not found.")
+            return
     
     if not os.path.exists(args.model_path):
         print(f"Error: Model file '{args.model_path}' not found.")
@@ -63,85 +70,119 @@ def main():
     model = model.to(args.device)
     model.eval()
 
-    cap = cv2.VideoCapture(args.video_path)
-    if not cap.isOpened():
-        print(f"Error: Could not open video '{args.video_path}'.")
-        return
+    caps = [cv2.VideoCapture(vp) for vp in args.video_paths]
+    for i, cap in enumerate(caps):
+        if not cap.isOpened():
+            print(f"Error: Could not open video '{args.video_paths[i]}'.")
+            return
 
-    original_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    original_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    # Use the first video for original dimensions and output properties
+    original_width = int(caps[0].get(cv2.CAP_PROP_FRAME_WIDTH))
+    original_height = int(caps[0].get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps = caps[0].get(cv2.CAP_PROP_FPS)
+    
+    # Total frames is the maximum among all videos
+    total_frames = max([int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) for cap in caps])
+    if args.max_seconds is not None:
+        max_frames_from_seconds = int(args.max_seconds * fps)
+        total_frames = min(total_frames, max_frames_from_seconds)
 
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out_video = cv2.VideoWriter(args.output_path, fourcc, fps, (original_width, original_height))
 
-    # To store frames at 640x360 for model input
-    frame_buffer = []
-    # To store recent ball coordinates for the trail
-    trail = deque(maxlen=args.trail_length)
+    # Buffers and trails for each video
+    frame_buffers = [[] for _ in range(num_videos)]
+    trails = [deque(maxlen=args.trail_length) for _ in range(num_videos)]
+    
+    # Store black frames for when a video ends
+    black_frame = np.zeros((original_height, original_width, 3), dtype=np.uint8)
 
-    print(f"Processing video: {args.video_path}")
-    print(f"Original Resolution: {original_width}x{original_height}, Total Frames: {total_frames}")
+    print(f"Processing {num_videos} video(s).")
+    print(f"Output Resolution: {original_width}x{original_height}, Max Frames: {total_frames}")
 
     with torch.no_grad():
         for _ in tqdm(range(total_frames), desc="Inference"):
-            ret, frame = cap.read()
-            if not ret:
-                break
-
-            # Store the original frame for writing the output
-            original_frame = frame.copy()
-
-            # Resize to 640x360 for the model
-            resized_frame = cv2.resize(frame, (640, 360))
-
-            # Handle the first two frames by duplicating the first frame
-            if len(frame_buffer) == 0:
-                frame_buffer = [resized_frame, resized_frame, resized_frame]
-            else:
-                frame_buffer.pop(0)
-                frame_buffer.append(resized_frame)
-
-            # Note: TracknetDataset orders frames as: [current, prev, pre_prev]
-            # Since frame_buffer is [pre_prev, prev, current]
-            # We pass them as: current (index 2), prev (index 1), pre_prev (index 0)
-            input_tensor = get_input_tensor(frame_buffer[2], frame_buffer[1], frame_buffer[0])
-            input_tensor = input_tensor.to(args.device)
-
-            # Forward pass
-            out = model(input_tensor)
+            frames = []
+            valid_idx = []
             
-            # Postprocess to get coordinates
-            feature_map = out.argmax(dim=1).detach().cpu().numpy()[0]
-            x, y = postprocess(feature_map, original_width, original_height)
+            for i, cap in enumerate(caps):
+                ret, frame = cap.read()
+                if not ret:
+                    frame = black_frame.copy()
+                frames.append(frame)
+                valid_idx.append(ret)
 
-            if x is not None and y is not None:
-                trail.append((x, y))
+            original_frames = [f.copy() for f in frames]
+
+            input_tensors = []
+            for i, frame in enumerate(frames):
+                resized_frame = cv2.resize(frame, (640, 360))
+
+                if len(frame_buffers[i]) == 0:
+                    frame_buffers[i] = [resized_frame, resized_frame, resized_frame]
+                else:
+                    frame_buffers[i].pop(0)
+                    frame_buffers[i].append(resized_frame)
+
+                # Note: TracknetDataset orders frames as: [current, prev, pre_prev]
+                # Since frame_buffer is [pre_prev, prev, current]
+                # We pass them as: current (index 2), prev (index 1), pre_prev (index 0)
+                t = get_input_tensor(frame_buffers[i][2], frame_buffers[i][1], frame_buffers[i][0])
+                input_tensors.append(t)
+
+            batched_input = torch.cat(input_tensors, dim=0).to(args.device)
+
+            out = model(batched_input)
+            
+            # Postprocess to get coordinates for each video
+            feature_maps = out.argmax(dim=1).detach().cpu().numpy()
+
+            for i in range(num_videos):
+                fm = feature_maps[i]
+                x, y = postprocess(fm, original_width, original_height)
+                
+                # Only add to trail if video hasn't ended and point is detected
+                if valid_idx[i] and x is not None and y is not None:
+                    trails[i].append((x, y))
+
+                # Draw trail on original_frames[i]
+                for j, point in enumerate(trails[i]):
+                    intensity = int(255 * (j + 1) / len(trails[i]))
+                    color = (0, intensity, 0)
+                    radius = max(2, int(6 * (j + 1) / len(trails[i])))
+                    
+                    cv2.circle(original_frames[i], point, radius=radius, color=color, thickness=-1)
+                    
+                    if j == len(trails[i]) - 1:
+                        cv2.circle(original_frames[i], point, radius=6, color=(0, 255, 0), thickness=-1)
+                        cv2.circle(original_frames[i], point, radius=8, color=(0, 0, 0), thickness=2)
+
+            # Combine frames into a single image
+            if num_videos == 1:
+                combined_frame = original_frames[0]
             else:
-                # If no ball detected, we don't append to trail.
-                pass
-
-            # Draw the trail and current dot
-            for i, point in enumerate(trail):
-                # Calculate alpha for fading effect (older points are smaller/more transparent)
-                # Since we can't easily draw transparent circles in OpenCV without overlays,
-                # we will simulate it by changing the color intensity and radius.
-                intensity = int(255 * (i + 1) / len(trail))
-                color = (0, intensity, 0) # Green fading out
-                radius = max(2, int(6 * (i + 1) / len(trail)))
+                # 2x2 grid
+                grid_frame = np.zeros((original_height, original_width, 3), dtype=np.uint8)
+                h_half = original_height // 2
+                w_half = original_width // 2
                 
-                # Draw trail dot
-                cv2.circle(original_frame, point, radius=radius, color=color, thickness=-1)
-                
-                # If it's the most recent point, draw a larger dot or a distinct boundary
-                if i == len(trail) - 1:
-                    cv2.circle(original_frame, point, radius=6, color=(0, 255, 0), thickness=-1)
-                    cv2.circle(original_frame, point, radius=8, color=(0, 0, 0), thickness=2)
+                for i in range(4):
+                    if i < num_videos:
+                        resized_quad = cv2.resize(original_frames[i], (w_half, h_half))
+                    else:
+                        resized_quad = cv2.resize(black_frame, (w_half, h_half))
+                        
+                    row = i // 2
+                    col = i % 2
+                    
+                    grid_frame[row*h_half : (row+1)*h_half, col*w_half : (col+1)*w_half] = resized_quad
+                    
+                combined_frame = grid_frame
 
-            out_video.write(original_frame)
+            out_video.write(combined_frame)
 
-    cap.release()
+    for cap in caps:
+        cap.release()
     out_video.release()
     print(f"\nInference completed. Saved output video to '{args.output_path}'.")
 
