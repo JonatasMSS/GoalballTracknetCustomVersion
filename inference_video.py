@@ -47,6 +47,7 @@ def main():
     parser.add_argument('--output_path', type=str, default='output.mp4', help='Path to save the output video.')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu', help='Device to run inference on (cuda/cpu).')
     parser.add_argument('--trail_length', type=int, default=7, help='Length of the ball trajectory trail.')
+    parser.add_argument('--start_time', type=float, default=0.0, help='Time in seconds to start processing from.')
     parser.add_argument('--max_seconds', type=float, default=None, help='Maximum number of seconds to process.')
     args = parser.parse_args()
 
@@ -81,8 +82,16 @@ def main():
     original_height = int(caps[0].get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = caps[0].get(cv2.CAP_PROP_FPS)
     
+    if args.start_time > 0:
+        start_frame_idx = int(args.start_time * fps)
+        for cap in caps:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame_idx)
+
     # Total frames is the maximum among all videos
     total_frames = max([int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) for cap in caps])
+    if args.start_time > 0:
+        total_frames = max(0, total_frames - start_frame_idx)
+
     if args.max_seconds is not None:
         max_frames_from_seconds = int(args.max_seconds * fps)
         total_frames = min(total_frames, max_frames_from_seconds)
