@@ -6,6 +6,7 @@ import numpy as np
 from models.TracknetV2 import TrackNet
 from datasets.TracknetV2Dataset import TracknetV2Dataset
 from torch.utils.data import DataLoader, Subset
+import matplotlib.pyplot as plt
 
 def train(model, train_loader, criterion, optimizer, device, batch_shown = 10):
     model.train()
@@ -40,6 +41,42 @@ def postprocess(feature_map):
             x = circles[0][0][0]
             y = circles[0][0][1]
     return x, y   
+
+
+def postprocess_grid(gt_img,feat_map, threshold=0.7):
+    pure_img = feat_map.copy()
+    feature_map = cv2.threshold(feat_map, threshold, 1.0, cv2.THRESH_BINARY)[1]  # Binarize the output
+    feature_map = (feature_map * 255).astype(np.uint8)  # Convert to uint8 for HoughCircles
+    grid_size = 2
+
+    x,y = postprocess(pure_img)
+
+    fig, axs = plt.subplots(2, grid_size, figsize=(10, 5))
+    axs[0,0].imshow(gt_img, cmap='gray')
+    axs[0,0].set_title('Ground Truth')
+
+
+    axs[0,1].imshow(feature_map, cmap='gray')
+    axs[0,1].set_title('Feature Map (Binarized)')
+
+    axs[1,0].imshow(pure_img, cmap='gray')
+    axs[1,0].set_title('Pure Feature Map')
+
+    axs[1,1].imshow(feature_map, cmap='gray')
+    # axs[1,1].imshow(gt_img, cmap='jet', alpha=0.5)
+    axs[1,1].scatter(x, y, color='green', s=100, edgecolors='white', label='Detected Ball')
+    axs[1,1].set_title('Overlay')
+
+
+    fig.tight_layout()
+
+    plt.show()
+
+    
+
+
+
+
 
 def validate(model, val_loader, criterion, device, writer=None, epoch=None):
     model.eval()
@@ -108,23 +145,21 @@ if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
     num_epochs = 1
     model = TrackNet().to(device)
-    criterion = torch.nn.BCELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    weight_path = "C:\\Users\\gears\\OneDrive\\Desktop\\Tracknet Goalball\\weights\\last_model.pth"
+
+    model.load_state_dict(torch.load(weight_path, map_location=device))
+
+
 
     dataset = TracknetV2Dataset(frames_path="assets/dataset/frames_out", gts_path="assets/dataset/gts", labels_path="assets/dataset/labels", debug=True)
-    x, y, x_pos, y_pos, vis = dataset[0]
+    x, y, x_pos, y_pos, vis = dataset[720*5*4]
 
-    x_to_train = x.unsqueeze(0)  # Adiciona dimensão de batch
-    y_to_train = y.unsqueeze(0)  # Adiciona dimensão de batch
-    y_pos_to_train = torch.tensor([y_pos]).unsqueeze(0)  # Adiciona dimensão de batch
-    x_pos_to_train = torch.tensor([x_pos]).unsqueeze(0)  # Adiciona dimensão de batch
-    vis_to_train = torch.tensor([vis]).unsqueeze(0)  # Adiciona dimensão de batch
+    model.eval()
+    with torch.no_grad():
+        output = model(x.unsqueeze(0).to(device))
+        output = output.squeeze(0).cpu().numpy()  # (C, H, W)
+        postprocess_grid(y.squeeze(0), output[0], threshold=0.99)
 
-    batch = torch.utils.data.TensorDataset(x_to_train, y_to_train, x_pos_to_train, y_pos_to_train, vis_to_train)
-    train_loader = DataLoader(batch, batch_size=1, shuffle=False)
 
-    
-
-    avg_loss, precision,recall, f1_score = validate(model,train_loader, criterion, device) 
 
 
