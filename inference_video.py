@@ -139,12 +139,13 @@ def main():
                 t = get_input_tensor(frame_buffers[i][2], frame_buffers[i][1], frame_buffers[i][0])
                 input_tensors.append(t)
 
-            batched_input = torch.cat(input_tensors, dim=0).to(args.device)
-
-            out = model(batched_input)
-            
-            # Postprocess to get coordinates for each video
-            feature_maps = out.argmax(dim=1).detach().cpu().numpy()
+            # Process each input sequentially to avoid GPU Out-Of-Memory errors when using 3 or 4 videos
+            feature_maps = []
+            for t in input_tensors:
+                t = t.to(args.device)
+                out = model(t)
+                fm = out.argmax(dim=1).detach().cpu().numpy()[0]
+                feature_maps.append(fm)
 
             for i in range(num_videos):
                 fm = feature_maps[i]
