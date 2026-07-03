@@ -19,12 +19,21 @@ if __name__ == '__main__':
     parser.add_argument('--exps_path', type=str, default='exps', help='path to save results')
     parser.add_argument('--dataset_path', type=str, default='assets/dataset', help='path to dataset')
     parser.add_argument('--model_path', type=str, default=None, help='path to model checkpoint')
+    parser.add_argument("--train_path", type=str, default=None, help="path to training frames")
+    parser.add_argument("--val_path", type=str, default=None, help="path to validation frames")
     args = parser.parse_args()
     
-    dataset = TracknetV1Dataset(frames_path=os.path.join(args.dataset_path, "frames_out"), gts_path=os.path.join(args.dataset_path, "gt"), labels_path=os.path.join(args.dataset_path, "labels"))
-    train_size = int(0.8 * len(dataset))
-    val_size = len(dataset) - train_size
-    train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
+
+    if args.train_path is not None and args.val_path is not None:
+        train_dataset = TracknetV1Dataset(frames_path=args.train_path, gts_path=os.path.join(args.train_path, "gt"), labels_path=os.path.join(args.train_path, "labels"))
+        val_dataset = TracknetV1Dataset(frames_path=args.val_path, gts_path=os.path.join(args.val_path, "gt"), labels_path=os.path.join(args.val_path, "labels"))
+    else:
+        train_dataset = TracknetV1Dataset(frames_path=os.path.join(args.dataset_path, "frames_out"), gts_path=os.path.join(args.dataset_path, "gt"), labels_path=os.path.join(args.dataset_path, "labels"))
+        val_dataset = TracknetV1Dataset(frames_path=os.path.join(args.dataset_path, "frames_out"), gts_path=os.path.join(args.dataset_path, "gt"), labels_path=os.path.join(args.dataset_path, "labels"))
+        train_size = int(0.8 * len(train_dataset))
+        val_size = len(train_dataset) - train_size
+        train_dataset, val_dataset = torch.utils.data.random_split(train_dataset, [train_size, val_size])
+    
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
     val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
     
