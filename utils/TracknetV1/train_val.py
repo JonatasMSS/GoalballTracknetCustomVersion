@@ -60,7 +60,7 @@ def train(model, train_loader, optimizer, device, epoch, max_iters=200):
 
 
 
-def validate(model, val_loader, device, epoch, min_dist=10):
+def validate(model, val_loader, device, epoch, min_dist=15):
     losses = []
     tp = [0, 0, 0, 0]
     fp = [0, 0, 0, 0]
