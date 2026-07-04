@@ -58,6 +58,16 @@ if __name__ == '__main__':
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
     val_best_metric = 0
 
+    print("=" * 40)
+    print(f"Starting training on device: {device}")
+    print(f"Train dataset size: {len(train_dataset)} samples")
+    print(f"Validation dataset size: {len(val_dataset)} samples")
+    print(f"Batch size: {args.batch_size}")
+    print(f"Learning rate: {args.lr}")
+    print(f"Total epochs: {args.num_epochs}")
+    print(f"Experiment ID: {args.exp_id}")
+    print("=" * 40)
+
     for epoch in range(args.num_epochs):
         train_loss = train(model, train_loader, optimizer, device, epoch, args.steps_per_epoch)
         print('train loss = {}'.format(train_loss))
