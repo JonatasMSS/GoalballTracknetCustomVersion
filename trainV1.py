@@ -25,8 +25,19 @@ if __name__ == '__main__':
     
 
     if args.train_path is not None and args.val_path is not None:
-        train_dataset = TracknetV1Dataset(frames_path=args.train_path, gts_path=os.path.join(args.train_path, "gt"), labels_path=os.path.join(args.train_path, "labels"))
-        val_dataset = TracknetV1Dataset(frames_path=args.val_path, gts_path=os.path.join(args.val_path, "gt"), labels_path=os.path.join(args.val_path, "labels"))
+        print(f"Using separate paths:")
+        print(f"  Train: {args.train_path}")
+        print(f"  Val: {args.val_path}")
+        train_dataset = TracknetV1Dataset(
+            frames_path=os.path.join(args.train_path, "frames_out"), 
+            gts_path=os.path.join(args.train_path, "gt"), 
+            labels_path=os.path.join(args.train_path, "labels")
+        )
+        val_dataset = TracknetV1Dataset(
+            frames_path=os.path.join(args.val_path, "frames_out"), 
+            gts_path=os.path.join(args.val_path, "gt"), 
+            labels_path=os.path.join(args.val_path, "labels")
+        )
     else:
         train_dataset = TracknetV1Dataset(frames_path=os.path.join(args.dataset_path, "frames_out"), gts_path=os.path.join(args.dataset_path, "gt"), labels_path=os.path.join(args.dataset_path, "labels"))
         val_dataset = TracknetV1Dataset(frames_path=os.path.join(args.dataset_path, "frames_out"), gts_path=os.path.join(args.dataset_path, "gt"), labels_path=os.path.join(args.dataset_path, "labels"))
