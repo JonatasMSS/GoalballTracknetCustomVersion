@@ -30,17 +30,17 @@ if __name__ == '__main__':
         print(f"  Val: {args.val_path}")
         train_dataset = TracknetV1Dataset(
             frames_path=os.path.join(args.train_path, "frames_out"), 
-            gts_path=os.path.join(args.train_path, "gt"), 
+            gts_path=os.path.join(args.train_path, "gts"), 
             labels_path=os.path.join(args.train_path, "labels")
         )
         val_dataset = TracknetV1Dataset(
             frames_path=os.path.join(args.val_path, "frames_out"), 
-            gts_path=os.path.join(args.val_path, "gt"), 
+            gts_path=os.path.join(args.val_path, "gts"), 
             labels_path=os.path.join(args.val_path, "labels")
         )
     else:
-        train_dataset = TracknetV1Dataset(frames_path=os.path.join(args.dataset_path, "frames_out"), gts_path=os.path.join(args.dataset_path, "gt"), labels_path=os.path.join(args.dataset_path, "labels"))
-        val_dataset = TracknetV1Dataset(frames_path=os.path.join(args.dataset_path, "frames_out"), gts_path=os.path.join(args.dataset_path, "gt"), labels_path=os.path.join(args.dataset_path, "labels"))
+        train_dataset = TracknetV1Dataset(frames_path=os.path.join(args.dataset_path, "frames_out"), gts_path=os.path.join(args.dataset_path, "gts"), labels_path=os.path.join(args.dataset_path, "labels"))
+        val_dataset = TracknetV1Dataset(frames_path=os.path.join(args.dataset_path, "frames_out"), gts_path=os.path.join(args.dataset_path, "gts"), labels_path=os.path.join(args.dataset_path, "labels"))
         train_size = int(0.8 * len(train_dataset))
         val_size = len(train_dataset) - train_size
         train_dataset, val_dataset = torch.utils.data.random_split(train_dataset, [train_size, val_size])
