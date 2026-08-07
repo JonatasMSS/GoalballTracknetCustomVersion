@@ -9,6 +9,11 @@ import argparse
 
 if __name__ == '__main__':
 
+
+
+    print("=" * 40)
+    print("Starting training")
+    print("=" * 40)
     parser = argparse.ArgumentParser()
     parser.add_argument('--batch_size', type=int, default=2, help='batch size')
     parser.add_argument('--exp_id', type=str, default='default', help='path to saving results')

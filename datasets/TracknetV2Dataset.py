@@ -10,7 +10,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 class TracknetV2Dataset(Dataset):
-    def __init__(self, frames_path = './dataset/frames_out',gts_path="./dataset/gts",labels_path="./dataset/labels", input_height=360, input_width=640, debug = False):
+    def __init__(self, frames_path = './dataset/frames_out',gts_path="./dataset/gt",labels_path="./dataset/labels", input_height=360, input_width=640, debug = False):
         self.frames_path = frames_path
         self.gts_path = gts_path
         self.labels_path = labels_path

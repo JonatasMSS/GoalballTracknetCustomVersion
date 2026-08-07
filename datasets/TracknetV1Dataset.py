@@ -34,7 +34,9 @@ class TracknetV1Dataset(Dataset):
                         path = os.path.join(self.frames_path, partidas, clip, frames[i])
                         path_prev = os.path.join(self.frames_path, partidas, clip, frames[i-1])
                         path_preprev = os.path.join(self.frames_path, partidas, clip, frames[i-2])
-                        path_gt = os.path.join(self.gts_path, partidas, clip, frames[i]).replace('.jpg', '.png')
+                        path_gt_png = os.path.join(self.gts_path, partidas, clip, frames[i]).replace('.jpg', '.png')
+                        path_gt_jpg = os.path.join(self.gts_path, partidas, clip, frames[i])
+                        path_gt = path_gt_png if os.path.exists(path_gt_png) else path_gt_jpg
                         label_path = os.path.join(self.labels_path, partidas, clip, frames[i]).replace('.jpg', '.txt')
                         
                         self.samples.append((path, path_prev, path_preprev, path_gt, label_path))
