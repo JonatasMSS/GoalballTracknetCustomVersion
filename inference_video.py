@@ -47,7 +47,6 @@ def main():
     parser.add_argument('--output_path', type=str, default='output.mp4', help='Path to save the output video.')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu', help='Device to run inference on (cuda/cpu).')
     parser.add_argument('--trail_length', type=int, default=7, help='Length of the ball trajectory trail.')
-    parser.add_argument('--max_jump_px', type=float, default=30, help='Reuse the previous detection when a point jumps farther than this distance.')
     parser.add_argument('--start_time', type=float, default=0.0, help='Time in seconds to start processing from.')
     parser.add_argument('--max_seconds', type=float, default=None, help='Maximum number of seconds to process.')
     args = parser.parse_args()
@@ -103,7 +102,6 @@ def main():
     # Buffers and trails for each video
     frame_buffers = [[] for _ in range(num_videos)]
     trails = [deque(maxlen=args.trail_length) for _ in range(num_videos)]
-    previous_points = [None] * num_videos
     
     # Store black frames for when a video ends
     black_frame = np.zeros((original_height, original_width, 3), dtype=np.uint8)
@@ -152,21 +150,10 @@ def main():
             for i in range(num_videos):
                 fm = feature_maps[i]
                 x, y = postprocess(fm, original_width, original_height)
-                repeat_previous = (
-                    valid_idx[i] and x is not None and y is not None
-                    and previous_points[i] is not None
-                    and np.hypot(x - previous_points[i][0], y - previous_points[i][1]) > args.max_jump_px
-                )
-
-                if repeat_previous:
-                    x, y = previous_points[i]
 
                 # Only add to trail if video hasn't ended and point is detected
                 if valid_idx[i] and x is not None and y is not None:
                     trails[i].append((x, y))
-                    previous_points[i] = (x, y)
-                else:
-                    previous_points[i] = None
 
                 # Draw trail on original_frames[i]
                 for j, point in enumerate(trails[i]):
