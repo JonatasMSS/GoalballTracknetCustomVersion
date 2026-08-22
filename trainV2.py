@@ -79,7 +79,7 @@ if __name__ == '__main__':
     loss_function = wbce_loss
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-5)
 
-    stepper = torch.optim.lr_scheduler.StepLR(optimizer, step_size=2, gamma=args.stepper_gamma)
+    stepper = torch.optim.lr_scheduler.StepLR(optimizer, step_size=4, gamma=args.stepper_gamma)
     
 
     train_dataset = TracknetV2Dataset(
