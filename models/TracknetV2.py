@@ -1,154 +1,150 @@
 
+
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
-from datasets.TracknetV2Dataset import TracknetV2Dataset
-import matplotlib.pyplot as plt
-import numpy as np
-from torchvision.utils import make_grid,save_image
-import os
-from utils import helpers
-import cv2  # pip install opencv-python
 
 
-# ─────────────────────────────────────────────
-# 1. BLOCO AUXILIAR
-# ─────────────────────────────────────────────
 
-def conv_block(in_ch, out_ch, kernel=3, padding=1):
-    """Conv → BN → ReLU (duas vezes) — tijolo básico do encoder."""
-    return nn.Sequential(
-        nn.Conv2d(in_ch, out_ch, kernel, padding=padding),
-        nn.BatchNorm2d(out_ch),
-        nn.ReLU(inplace=True),
-        nn.Conv2d(out_ch, out_ch, kernel, padding=padding),
-        nn.BatchNorm2d(out_ch),
-        nn.ReLU(inplace=True),
-    )
-
-
-# ─────────────────────────────────────────────
-# 2. MODELO TRACKNET
-# ─────────────────────────────────────────────
-
-class TrackNet(nn.Module):
-    """
-    Encoder–Decoder estilo U-Net com backbone VGG-like.
-
-    Parâmetros
-    ----------
-    in_frames : int
-        Número de frames de entrada (padrão 3).
-        Canais de entrada = in_frames * 3  (RGB por frame).
-    base_ch : int
-        Número de filtros no primeiro bloco (dobra a cada nível).
-    """
-
-    def __init__(self, in_frames: int = 3, base_ch: int = 64):
-        super().__init__()
-        self.model_train_info = {
-            "train_data":[],
-            "val_data":[],
-            "epoch":[]
-        }
-        in_ch = in_frames * 3  # 3 frames × 3 canais = 9
-
-        # ── Encoder ──────────────────────────────
-        self.enc1 = conv_block(in_ch,       base_ch)      # 9  → 64
-        self.enc2 = conv_block(base_ch,     base_ch * 2)  # 64 → 128
-        self.enc3 = conv_block(base_ch * 2, base_ch * 4)  # 128 → 256
-        self.enc4 = conv_block(base_ch * 4, base_ch * 8)  # 256 → 512
-
-        self.pool = nn.MaxPool2d(2, 2)
-
-        # ── Bottleneck ───────────────────────────
-        self.bottleneck = conv_block(base_ch * 8, base_ch * 16)  # 512 → 1024
-
-        # ── Decoder ──────────────────────────────
-        self.dec4_conv = conv_block(base_ch * 16 + base_ch * 8, base_ch * 8)
-        self.dec3_conv = conv_block(base_ch * 8  + base_ch * 4, base_ch * 4)
-        self.dec2_conv = conv_block(base_ch * 4  + base_ch * 2, base_ch * 2)
-        self.dec1_conv = conv_block(base_ch * 2  + base_ch,     base_ch)
-
-        # ── Cabeça de saída ──────────────────────
-        self.head = nn.Sequential(
-            nn.Conv2d(base_ch, 32, kernel_size=3, padding=1),
-            nn.BatchNorm2d(32),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(32, 1, kernel_size=1)  
+class ConvBlock(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(ConvBlock, self).__init__()
+        self.conv = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
         )
-    
-        # self._init_output_layer()
 
-    # def _init_output_layer(self):
-    #     """
-    #     Inicializa a cabeça de saída para valores próximos a 0.5.
-    #     Isso faz com que pré-treino gere gaussianas fracas, não ruído puro.
-    #     """
-    #     # Inicializa último layer com valores pequenos e negativos
-    #     # Assim, sigmoid(x) ≈ 0.4-0.5 (não ruído branco)
-    #     with torch.no_grad():
-    #         final_layer = self.head[-1]  # último Conv2d
-    #         final_layer.weight.fill_(0.01)
-    #         if final_layer.bias is not None:
-    #             final_layer.bias.fill_(-2.0)  # sigmoid(-2) ≈ 0.12
-
-
-    def _up_and_concat(self, x, skip):
-        """Faz upsample de x para o tamanho de skip, depois concatena."""
-        x = F.interpolate(x, size=skip.shape[2:], mode='bilinear', align_corners=False)
-        return torch.cat([x, skip], dim=1)
-
-    def save_epoch_info(self,train_loss, val_loss, epoch):
-        self.model_train_info['train_data'].append(train_loss)
-        self.model_train_info['val_data'].append(val_loss)
-        self.model_train_info['epoch'].append(epoch)
-    
     def forward(self, x):
-        # ── Encoder ──
-        e1 = self.enc1(x)
-        e2 = self.enc2(self.pool(e1))
-        e3 = self.enc3(self.pool(e2))
-        e4 = self.enc4(self.pool(e3))
-
-        # ── Bottleneck ──
-        b  = self.bottleneck(self.pool(e4))
-
-        # ── Decoder ──
-        d4 = self.dec4_conv(self._up_and_concat(b,  e4))
-        d3 = self.dec3_conv(self._up_and_concat(d4, e3))
-        d2 = self.dec2_conv(self._up_and_concat(d3, e2))
-        d1 = self.dec1_conv(self._up_and_concat(d2, e1))
-
-        return torch.sigmoid(self.head(d1))  # (B, 1, H, W) ∈ [0, 1]
+        return self.conv(x)
 
 
-if __name__ == "__main__":
-    model = TrackNet().to("cpu")
-    DIR = "assets/dataset/"
-    frames = os.path.join(DIR, "frames_out")
-    gts = os.path.join(DIR,"gts")
+class TrackentV2(nn.Module):
+    def __init__(self, input_channels=9, mode="train"):
+        super(TrackentV2, self).__init__()
+        self.input_channels = input_channels
+        self.set_mode(mode)
+        #Bloco 1
+        self.conv1 = ConvBlock(input_channels, 64)
+        self.conv2 = ConvBlock(64, 64)
+        
 
-    labels = os.path.join(DIR,"labels")
+        self.pool = nn.MaxPool2d(kernel_size=2, stride=2) 
 
-    dataset = TracknetV2Dataset(frames_path=frames, gts_path=gts, labels_path=labels, debug=False)
-    x, y, x_pos, y_pos, vis = dataset[0]
 
-    input = x.unsqueeze(0)  # (1, 9, H, W)
-    output = model(input)   # (1, 1, H, W)
-    print(f"Input shape: {input.shape}, Output shape: {output.shape}")
-    fig, axs = plt.subplots(1, 2, figsize=(10, 5))
-    input =  helpers.denormalize(input.squeeze(0)[6:9])  # (3, H, W)
+        ## Bloco 2
+        self.conv3 = ConvBlock(64, 128)
+        self.conv4 = ConvBlock(128, 128)
 
-    axs[0].imshow(input.permute(1, 2, 0).cpu().numpy())
-    axs[0].set_title("Input (Frame 3)")
-    axs[0].axis('off')
+        self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2)
 
-    axs[1].imshow(output.squeeze(0).squeeze(0).detach().cpu().numpy(), cmap='gray')
-    axs[1].set_title("Output (Predicted Heatmap)")
-    axs[1].axis('off')
-    plt.show()
+
+        # Bloco 3
+        self.conv5 = ConvBlock(128, 256)
+        self.conv6 = ConvBlock(256, 256)
+        self.conv7 = ConvBlock(256, 256)
+
+        self.pool3 = nn.MaxPool2d(kernel_size=2, stride=2)
+
+        
+        self.bottleneck = nn.Sequential(
+            ConvBlock(256, 512), #8
+            ConvBlock(512, 512), #9
+            ConvBlock(512, 512) # 10
+        )
+
+        #Nearest -> Ele funciona pegando o pixel mais próximo e replicando ele para preencher a nova dimensão.
+        #Bilinear -> Ele faz uma interpolação linear entre os pixels vizinhos para calcular o valor do pixel na nova dimensão. Mas ele pode introduzir artefatos de suavização, especialmente em imagens com bordas nítidas.
+        self.up1 = nn.Upsample(
+            scale_factor=2, mode='nearest'  
+        )
+
+        #Decoder 1
+        self.conv11 = ConvBlock(512 + 256, 256) #10 
+        self.conv12 = ConvBlock(256, 256) #12
+        self.conv13 = ConvBlock(256, 256) #13
+
+        self.up2 = nn.Upsample(
+            scale_factor=2, mode='nearest'
+        )
+
+        # Decoder 2
+
+        # 256 + 128 = 384
+        self.conv14 = ConvBlock(384, 128)
+        self.conv15 = ConvBlock(128, 128)
+
+
+        #Decoder 3 
+
+        self.up3 = nn.Upsample(
+            scale_factor=2,
+            mode="nearest"
+        )
+
+        # 128 + 64 = 192
+
+        self.conv16 = ConvBlock(192, 64)
+        self.conv17 = ConvBlock(64, 64)
+
+        self.out = nn.Conv2d(64, 3, kernel_size=1, stride=1, padding=0)
+
+        self.sig = nn.Sigmoid()
+
+    def set_mode(self, mode):
+        if mode not in {"train", "inference"}:
+            raise ValueError("mode must be 'train' or 'inference'")
+        self.mode = mode
+
+    def forward(self,x):
+
+        #Bloco 01
+        en1 = self.conv1(x)
+        en2 = self.conv2(en1)
+        pool1 = self.pool(en2)
+
+        #Bloco 02
+        en3 = self.conv3(pool1)
+        en4 = self.conv4(en3)
+        pool2 = self.pool2(en4)
+
+        # Bloco3
+
+        en5 = self.conv5(pool2)
+        en6 = self.conv6(en5)
+        en7 = self.conv7(en6)
+        pool3 = self.pool3(en7)
+
+        #Bottleneck
+        bottleneck = self.bottleneck(pool3)
+
+        up1 = self.up1(bottleneck)
+        concat1 = torch.cat((up1, en7), dim=1)
+        dec1 = self.conv11(concat1)
+        dec2 = self.conv12(dec1)
+        dec3 = self.conv13(dec2)
+
+        up2 = self.up2(dec3)
+        concat2 = torch.cat((up2, en4), dim=1)
+
+        dec4 = self.conv14(concat2)
+        dec5 = self.conv15(dec4)
+
+        up3 = self.up3(dec5)
+        concat3 = torch.cat((up3, en2), dim=1)
+        dec6 = self.conv16(concat3)
+        dec7 = self.conv17(dec6)
+
+        output = self.out(dec7)
+        if self.mode == "inference":
+            return self.sig(output)
+        return output
+
+
+    def show_model_summary(self, input_size=(9, 128, 128)):
+        from torchsummary import summary
+
+        summary(self, input_size=input_size)
+
 
     
 

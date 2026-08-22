@@ -1,164 +1,177 @@
 
 
-import torch
-import cv2
 import numpy as np
-from models.TracknetV2 import TrackNet
-from datasets.TracknetV2Dataset import TracknetV2Dataset
-from torch.utils.data import DataLoader, Subset
-import matplotlib.pyplot as plt
+import cv2
+import torch
 
-def train(model, train_loader, criterion, optimizer, device, batch_shown = 10):
+
+def _set_model_mode(model, mode):
+    """Set TrackNet's output mode, including when wrapped by DataParallel."""
+    target_model = model.module if hasattr(model, "module") else model
+    target_model.set_mode(mode)
+
+def train(model, train_loader, criterion, optimizer, device, batch_shown = 1):
     model.train()
+    _set_model_mode(model, "train")
     running_loss = []
 
-    for batch_idx, (inputs, targets,_,_,_ ) in enumerate(train_loader):
-        inputs, targets = inputs.to(device), targets.to(device)
+    for batch_idx,(x,y,_) in enumerate(train_loader):
+
+        
+        inputs, targets = x.to(device), y.to(device)
 
         optimizer.zero_grad()
 
-        outputs = model(inputs)
-        
-        loss = criterion(outputs, targets)
+        output = model(inputs)
+        loss = criterion(output, targets)
+
         loss.backward()
         optimizer.step()
+
+        
 
         if batch_idx % batch_shown == 0:
             print(f"Batch {batch_idx}/{len(train_loader)} - Loss: {loss.item():.4f}")
         
 
         running_loss.append(loss.item())
-    avg_loss = sum(running_loss) / len(running_loss)
+    avg_loss = torch.tensor(running_loss).mean().item()
     return avg_loss
 
-def postprocess(feature_map):
-    feature_map = cv2.threshold(feature_map, 0.7, 1.0, cv2.THRESH_BINARY)[1]  # Binarize the output
-    x, y = None, None
-    feature_map = (feature_map * 255).astype(np.uint8)  # Convert to uint8 for HoughCircles
-    circles = cv2.HoughCircles(feature_map, cv2.HOUGH_GRADIENT, dp=1, minDist=1, param1=60, param2=10, minRadius=2, maxRadius=7)
-    if circles is not None:
-        if len(circles) == 1:
-            x = circles[0][0][0]
-            y = circles[0][0][1]
-    return x, y   
+
+def get_circle_center_hough(
+    binary_image,
+    min_radius=1,
+    max_radius=50,
+    min_dist=20,
+    param1=50,
+    param2=10
+):
 
 
-def postprocess_grid(gt_img,feat_map, threshold=0.7):
-    pure_img = feat_map.copy()
-    feature_map = cv2.threshold(feat_map, threshold, 1.0, cv2.THRESH_BINARY)[1]  # Binarize the output
-    feature_map = (feature_map * 255).astype(np.uint8)  # Convert to uint8 for HoughCircles
-    grid_size = 2
+    # Garante uint8
+    image = binary_image.astype(np.uint8)
 
-    x,y = postprocess(pure_img)
+    # Suavização para ajudar o Hough
+    blurred = cv2.GaussianBlur(
+        image,
+        (9, 9),
+        2
+    )
 
-    fig, axs = plt.subplots(2, grid_size, figsize=(10, 5))
-    axs[0,0].imshow(gt_img, cmap='gray')
-    axs[0,0].set_title('Ground Truth')
+    circles = cv2.HoughCircles(
+        blurred,
+        cv2.HOUGH_GRADIENT,
+        dp=1,
+        minDist=min_dist,
+        param1=param1,
+        param2=param2,
+        minRadius=min_radius,
+        maxRadius=max_radius
+    )
 
+    if circles is None:
+        return None
 
-    axs[0,1].imshow(feature_map, cmap='gray')
-    axs[0,1].set_title('Feature Map (Binarized)')
+    circles = np.round(circles[0]).astype(int)
 
-    axs[1,0].imshow(pure_img, cmap='gray')
-    axs[1,0].set_title('Pure Feature Map')
+    # Primeiro círculo detectado
+    x, y, radius = circles[0]
 
-    axs[1,1].imshow(feature_map, cmap='gray')
-    # axs[1,1].imshow(gt_img, cmap='jet', alpha=0.5)
-    axs[1,1].scatter(x, y, color='green', s=100, edgecolors='white', label='Detected Ball')
-    axs[1,1].set_title('Overlay')
-
-
-    fig.tight_layout()
-
-    plt.show()
-
-    
-
-
+    return x, y
 
 
+def postprocessing(prediction, threshold=0.5):
+    # Apply sigmoid to get probabilities
+    prob_map = prediction
 
-def validate(model, val_loader, criterion, device, writer=None, epoch=None):
+    # Convert to numpy array and squeeze to [H, W]
+    prob_map_np = prob_map.squeeze(0).cpu().numpy()
+
+    # Thresholding
+    binary_map = (prob_map_np > threshold).astype(np.uint8) * 255
+
+    # Use Hough Circle Transform to detect circles
+    center = get_circle_center_hough(binary_map)
+
+    return center
+
+
+def validate(
+    model,
+    val_loader,
+    criterion,
+    device,
+    writer=None,
+    epoch=None,
+    max_distance=10,
+    threshold=0.5,
+):
     model.eval()
     val_loss = []
-    tp = [0,0]
-    fp = [0,0]
-    tn = [0,0]
-    fn = [0,0]
-    max_dist = 10
+    counts = {"tp": 0, "tn": 0, "fp": 0, "fn": 0}
 
 
     with torch.no_grad():
-        for x, y, x_gt,y_gt,vis in val_loader:
+        for x, y, labels in val_loader:
             inputs, targets = x.to(device), y.to(device)
 
-            outputs = model(inputs)
-            loss = criterion(outputs, targets)
+            _set_model_mode(model, "train")
+            logits = model(inputs)
+            loss = criterion(logits, targets)
 
             print(f"Validation Batch Loss: {loss.item():.4f}")
             val_loss.append(loss.item())
 
-            imgs_to_writer = torch.cat([targets, outputs], dim=0)  # Concatena inputs, targets e outputs para visualização
+            _set_model_mode(model, "inference")
+            probabilities = model(inputs)
 
-            writer.add_images('Target_Outputs/Val', imgs_to_writer, epoch, dataformats='NCHW')
-            
-            for img_idx in range(outputs.size(0)):
-                img_to_show = outputs[img_idx]
-                img_to_show = img_to_show.squeeze(0).cpu().numpy()  # (H, W)
-               
-                x, y = postprocess(img_to_show)
-                gt_x, gt_y = x_gt[img_idx].item(), y_gt[img_idx].item()
-                visibility = vis[img_idx].item()
-            
-                
+            for batch_idx in range(probabilities.size(0)):
+                for channel_idx in range(probabilities.size(1)):
+                    prediction = probabilities[batch_idx, channel_idx].unsqueeze(0)
+                    center = postprocessing(prediction, threshold=threshold)
+                    gt_x, gt_y, visibility = (
+                        labels[channel_idx][0][batch_idx].item(),
+                        labels[channel_idx][1][batch_idx].item(),
+                        labels[channel_idx][2][batch_idx].item(),
+                    )
 
-                if x is not None and y is not None:
-                    if visibility == 1:  # Ball is visible
-                        dist = np.sqrt((x - gt_x) ** 2 + (y - gt_y) ** 2)
-                        if dist <= max_dist:
-                            tp[visibility] += 1  # True Positive
-                        else:
-                            fp[visibility] += 1  # False Positive
-                    else:
-                        fp[visibility] += 1  # False Positive (ball not visible but detected)
-                else:
-                    if visibility == 1:  # Ball is visible but not detected
-                        fn[visibility] += 1  # False Negative
-                    else:
-                        tn[visibility] += 1  # True Negative (ball not visible and not detected)
+                    if center is None:
+                        counts["fn" if visibility == 1 else "tn"] += 1
+                        continue
 
-        print(f"TP (Visible): {tp[1]}, FP (Visible): {fp[1]}, TN (Not Visible): {tn[0]}, FN (Visible): {fn[1]}")
-        eps = 1e-6
-        precision = tp[1] / (tp[1] + fp[1] + eps)        
-        recall = tp[1] / (tp[1] + fn[1] + eps)
-        f1_score = 2 * (precision * recall) / (precision + recall + eps)  
-        
-        avg_val_loss = sum(val_loss) / len(val_loss)
+                    if visibility != 1:
+                        counts["fp"] += 1
+                        continue
+
+                    distance = np.hypot(center[0] - gt_x, center[1] - gt_y)
+                    counts["tp" if distance <= max_distance else "fp"] += 1
+
+    eps = 1e-6
+    precision = counts["tp"] / (counts["tp"] + counts["fp"] + eps)
+    recall = counts["tp"] / (counts["tp"] + counts["fn"] + eps)
+    f1_score = 2 * precision * recall / (precision + recall + eps)
+    total = sum(counts.values())
+    accuracy = (counts["tp"] + counts["tn"]) / (total + eps)
+    avg_val_loss = float(np.mean(val_loss)) if val_loss else 0.0
+
+    print(
+        "Validation metrics | "
+        f"TP: {counts['tp']}, TN: {counts['tn']}, "
+        f"FP: {counts['fp']}, FN: {counts['fn']}, total: {total} | "
+        f"accuracy: {accuracy:.4f}, precision: {precision:.4f}, "
+        f"recall: {recall:.4f}, f1: {f1_score:.4f}"
+    )
+
+    if writer is not None and epoch is not None:
+        for metric, value in counts.items():
+            writer.add_scalar(f"Metrics/{metric.upper()}", value, epoch)
+        writer.add_scalar("Metrics/Total", total, epoch)
+        writer.add_scalar("Metrics/Accuracy", accuracy, epoch)
 
 
     return avg_val_loss, precision, recall, f1_score
             
-
-if __name__ == "__main__":
-    # Exemplo de uso
-    
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    num_epochs = 1
-    model = TrackNet().to(device)
-    weight_path = "C:\\Users\\gears\\OneDrive\\Desktop\\Tracknet Goalball\\weights\\last_model.pth"
-
-    model.load_state_dict(torch.load(weight_path, map_location=device))
-
-
-
-    dataset = TracknetV2Dataset(frames_path="assets/dataset/frames_out", gts_path="assets/dataset/gts", labels_path="assets/dataset/labels", debug=True)
-    x, y, x_pos, y_pos, vis = dataset[720*5*4]
-
-    model.eval()
-    with torch.no_grad():
-        output = model(x.unsqueeze(0).to(device))
-        output = output.squeeze(0).cpu().numpy()  # (C, H, W)
-        postprocess_grid(y.squeeze(0), output[0], threshold=0.99)
 
 
 

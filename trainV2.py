@@ -2,8 +2,8 @@ import argparse
 import os
 
 import torch
-from models.TracknetV2 import TrackNet
-from torch.utils.data import DataLoader, random_split
+from models.TracknetV2 import TrackentV2
+from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from utils.TracknetV2.loss import wbce_loss
 from datasets.TracknetV2Dataset import TracknetV2Dataset
@@ -16,12 +16,16 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=4, help='batch size')
     parser.add_argument('--num_epochs', type=int, default=10, help='total training epochs')
     parser.add_argument('--lr', type=float, default=1e-4, help='learning rate')
-    parser.add_argument('--val_intervals', type=int, default=1, help='number of epochs to run validation')
+    parser.add_argument("--stepper_gamma", type=float, default=0.1, help="Gamma for StepLR scheduler")
+    parser.add_argument('--val_intervals', type=int, default=2, help='number of epochs to run validation')
     parser.add_argument('--exps_path', type=str, default='exps', help='path to save results')
     parser.add_argument('--logs_path', type=str, default='runs/logs', help='path to save logs')
-    parser.add_argument('--dataset_path', type=str, default='assets/dataset', help='path to dataset')
+    parser.add_argument('--train_dataset_path', type=str, required=True, help='path to training dataset')
+    parser.add_argument('--val_dataset_path', type=str, required=True, help='path to validation dataset')
+    parser.add_argument('--original_width', type=int, default=1920, help='original frame width used by labels')
+    parser.add_argument('--original_height', type=int, default=1080, help='original frame height used by labels')
     parser.add_argument('--model_path', type=str, default=None, help='path to model checkpoint')
-    parser.add_argument('--parallel', type=bool, default=False, help='use multiple GPUs')
+    parser.add_argument('--parallel', action='store_true', help='use multiple GPUs')
     args = parser.parse_args()
 
     
@@ -34,7 +38,13 @@ if __name__ == '__main__':
     logs_dir = args.logs_path
     weights_dir = args.exps_path
 
-    dataset_dir = args.dataset_path
+    train_dataset_path = args.train_dataset_path
+    val_dataset_path = args.val_dataset_path
+
+    if os.path.abspath(train_dataset_path) == os.path.abspath(val_dataset_path):
+        parser.error('train_dataset_path and val_dataset_path must be different')
+    if args.val_intervals <= 0:
+        parser.error('val_intervals must be greater than zero')
 
 
     if not os.path.exists(logs_dir):
@@ -48,7 +58,7 @@ if __name__ == '__main__':
 
     best_model_path = os.path.join(weights_dir, 'best_model.pth')
     last_model_path = os.path.join(weights_dir, 'last_model.pth')
-    model = TrackNet().to(device)
+    model = TrackentV2().to(device)
 
     
 
@@ -69,32 +79,37 @@ if __name__ == '__main__':
     loss_function = wbce_loss
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-5)
 
+    stepper = torch.optim.lr_scheduler.StepLR(optimizer, step_size=2, gamma=args.stepper_gamma)
+    
+
+    train_dataset = TracknetV2Dataset(
+        frames_path=f"{train_dataset_path}/frames_out",
+        gts_path=f"{train_dataset_path}/gts",
+        labels_path=f"{train_dataset_path}/labels",
+        original_width=args.original_width,
+        original_height=args.original_height,
+    )
+    val_dataset = TracknetV2Dataset(
+        frames_path=f"{val_dataset_path}/frames_out",
+        gts_path=f"{val_dataset_path}/gts",
+        labels_path=f"{val_dataset_path}/labels",
+        original_width=args.original_width,
+        original_height=args.original_height,
+    )
 
 
 
     
-    
-
-    
-
-    dataset = TracknetV2Dataset(frames_path=f"{dataset_dir}/frames_out", gts_path=f"{dataset_dir}/gts", labels_path=f"{dataset_dir}/labels", debug=False)
-
- 
-    train_size = int(0.8 * len(dataset))
-    val_size = len(dataset) - train_size
-
-    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
-
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
-
     num_epochs = args.num_epochs
     epochs_to_validate = args.val_intervals
 
     best_f1_score = 0.0
 
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
+
     for epoch in range(num_epochs):
-        train_loss = train(model, train_loader, loss_function,optimizer, device)
+        train_loss = train(model, train_loader, loss_function,optimizer, device,batch_shown=1)
 
         writer.add_scalar('Loss/Train', train_loss, epoch)
 
@@ -120,6 +135,8 @@ if __name__ == '__main__':
         else:
             torch.save(model.state_dict(), last_model_path)
         print(f"Last model saved at epoch {epoch+1}")
+
+        stepper.step()  # Update learning rate
         
     writer.close()
 
