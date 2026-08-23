@@ -7,13 +7,14 @@ import cv2
 import numpy as np
 import torch
 import torch.nn.functional as F
-from tqdm import tqdm
+from tqdm import tqdmNo
 
-from models.TracknetV2 import TrackNet
+from models.TracknetV2 import TrackentV2
 
 def preprocess_frame(frame, input_size, device, mean, std):
     """Resize and normalize a BGR frame to match training preprocessing."""
-    frame_tensor = torch.from_numpy(frame).to(device)
+    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    frame_tensor = torch.from_numpy(frame_rgb).to(device)
     frame_tensor = frame_tensor.permute(2, 0, 1).float() / 255.0
     frame_tensor = F.interpolate(
         frame_tensor.unsqueeze(0),
@@ -33,8 +34,7 @@ def build_input(frames, input_size, device, mean, std):
 
 
 def find_ball_center(heatmap, threshold, hough_params):
-    heatmap_uint8 = (heatmap * 255.0).astype(np.uint8)
-    _, thresh = cv2.threshold(heatmap_uint8, threshold, 255, cv2.THRESH_BINARY)
+    thresh = ((heatmap > threshold).astype(np.uint8) * 255)
     blurred = cv2.medianBlur(thresh, 5)
 
     circles = cv2.HoughCircles(
@@ -70,7 +70,7 @@ if __name__ == "__main__":
     parser.add_argument("--video_out", type=str, default="output_video.mp4", help="Path to save output video")
     parser.add_argument("--input_width", type=int, default=640, help="Model input width")
     parser.add_argument("--input_height", type=int, default=360, help="Model input height")
-    parser.add_argument("--threshold", type=int, default=200, help="Heatmap threshold 0-255")
+    parser.add_argument("--threshold", type=float, default=0.5, help="Ball probability threshold (0-1)")
     parser.add_argument("--trail_length", type=int, default=4, help="Max trajectory points to draw")
     parser.add_argument("--hough_dp", type=float, default=1.2, help="HoughCircles dp")
     parser.add_argument("--hough_min_dist", type=int, default=10, help="HoughCircles minDist")
@@ -82,14 +82,14 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = TrackNet().to(device)
+    model = TrackentV2(mode="inference").to(device)
 
     model.load_state_dict(torch.load(args.model_path, map_location=device))
     model.eval()
 
     input_size = (args.input_height, args.input_width)
-    mean = torch.tensor([0.1307, 0.1307, 0.1307], device=device).view(3, 1, 1)
-    std = torch.tensor([0.3081, 0.3081, 0.3081], device=device).view(3, 1, 1)
+    mean = torch.tensor([0.485, 0.456, 0.406], device=device).view(3, 1, 1)
+    std = torch.tensor([0.229, 0.224, 0.225], device=device).view(3, 1, 1)
 
     cap = cv2.VideoCapture(args.video_path)
     if not cap.isOpened():
@@ -105,6 +105,8 @@ if __name__ == "__main__":
     os.makedirs(os.path.dirname(args.video_out) or ".", exist_ok=True)
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     out = cv2.VideoWriter(args.video_out, fourcc, fps, (original_width, original_height))
+    if not out.isOpened():
+        raise ValueError(f"Unable to open output video: {args.video_out}")
 
     prev_frames = deque(maxlen=2)
     trajectory = deque(maxlen=args.trail_length)
@@ -126,13 +128,12 @@ if __name__ == "__main__":
             if not ret:
                 break
 
-            if frame_idx < 2:
-                frames = [frame, frame, frame]
-            else:
-                frames = [prev_frames[0], prev_frames[1], frame]
+            frames = list(prev_frames) + [frame]
+            while len(frames) < 3:
+                frames.insert(0, frames[0])
 
             input_tensor = build_input(frames, input_size, device, mean, std)
-            heatmap = model(input_tensor).squeeze(0).squeeze(0).detach().cpu().numpy()
+            heatmap = model(input_tensor)[0, 2].detach().cpu().numpy()
 
             center = find_ball_center(heatmap, args.threshold, hough_params)
             if center is not None:
