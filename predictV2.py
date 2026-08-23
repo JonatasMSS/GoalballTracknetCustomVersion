@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 import torch
 import torch.nn.functional as F
-from tqdm import tqdmNo
+from tqdm import tqdm
 
 from models.TracknetV2 import TrackentV2
 
