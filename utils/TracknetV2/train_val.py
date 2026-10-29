@@ -13,7 +13,8 @@ def _set_model_mode(model, mode):
 def train(model, train_loader, criterion, optimizer, device, batch_shown = 1):
     model.train()
     _set_model_mode(model, "train")
-    running_loss = []
+    running_loss = 0.0
+    sample_count = 0
 
     for batch_idx,(x,y,_) in enumerate(train_loader):
 
@@ -34,9 +35,11 @@ def train(model, train_loader, criterion, optimizer, device, batch_shown = 1):
             print(f"Batch {batch_idx}/{len(train_loader)} - Loss: {loss.item():.4f}")
         
 
-        running_loss.append(loss.item())
-    avg_loss = torch.tensor(running_loss).mean().item()
-    return avg_loss
+        running_loss += loss.item() * inputs.size(0)
+        sample_count += inputs.size(0)
+    if sample_count == 0:
+        raise ValueError("Training loader contains no samples")
+    return running_loss / sample_count
 
 
 def get_circle_center_hough(
@@ -108,7 +111,8 @@ def validate(
     threshold=0.5,
 ):
     model.eval()
-    val_loss = []
+    val_loss = 0.0
+    sample_count = 0
     counts = {"tp": 0, "tn": 0, "fp": 0, "fn": 0}
 
 
@@ -121,10 +125,11 @@ def validate(
             loss = criterion(logits, targets)
 
             print(f"Validation Batch Loss: {loss.item():.4f}")
-            val_loss.append(loss.item())
+            val_loss += loss.item() * inputs.size(0)
+            sample_count += inputs.size(0)
 
             _set_model_mode(model, "inference")
-            probabilities = model(inputs)
+            probabilities = torch.sigmoid(logits)
 
             for batch_idx in range(probabilities.size(0)):
                 for channel_idx in range(probabilities.size(1)):
@@ -147,13 +152,16 @@ def validate(
                     distance = np.hypot(center[0] - gt_x, center[1] - gt_y)
                     counts["tp" if distance <= max_distance else "fp"] += 1
 
+    if sample_count == 0:
+        raise ValueError("Validation loader contains no samples")
+
     eps = 1e-6
     precision = counts["tp"] / (counts["tp"] + counts["fp"] + eps)
     recall = counts["tp"] / (counts["tp"] + counts["fn"] + eps)
     f1_score = 2 * precision * recall / (precision + recall + eps)
     total = sum(counts.values())
     accuracy = (counts["tp"] + counts["tn"]) / (total + eps)
-    avg_val_loss = float(np.mean(val_loss)) if val_loss else 0.0
+    avg_val_loss = val_loss / sample_count
 
     print(
         "Validation metrics | "
