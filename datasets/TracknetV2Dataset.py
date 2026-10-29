@@ -4,6 +4,7 @@ from torch.utils.data import Dataset
 from torchvision.utils import make_grid
 from torchvision import transforms
 import os
+import re
 import cv2
 import numpy as np
 
@@ -11,6 +12,14 @@ import matplotlib.pyplot as plt
 
 class TracknetV2Dataset(Dataset):
     def __init__(self, frames_path, gts_path, labels_path,original_width, original_height ,input_width=640, input_height=360, debug=False):
+        if not np.isfinite([original_width, original_height]).all() or original_width <= 0 or original_height <= 0:
+            raise ValueError("original_width and original_height must be finite and greater than zero")
+        if (
+            not np.isfinite([input_width, input_height]).all()
+            or input_width <= 0 or input_height <= 0
+            or input_width % 8 != 0 or input_height % 8 != 0
+        ):
+            raise ValueError("input_width and input_height must be positive multiples of 8")
         self.frames_path = frames_path
         self.gts_path = gts_path
         self.labels_path = labels_path
@@ -34,7 +43,35 @@ class TracknetV2Dataset(Dataset):
         for partidas in sorted(os.listdir(self.frames_path)):
             clips_path = os.path.join(self.frames_path, partidas)
             for clip in sorted(os.listdir(clips_path)):
-                frames = sorted(os.listdir(os.path.join(clips_path, clip)))
+                frames = sorted(
+                    os.listdir(os.path.join(clips_path, clip)),
+                    key=lambda name: (
+                        [int(part) if part.isdigit() else part.lower() for part in re.split(r'(\d+)', name)],
+                        name,
+                    ),
+                )
+                if len(frames) < 3:
+                    continue
+                gt_clip_path = os.path.join(self.gts_path, partidas, clip)
+                gt_index = {}
+                for filename in sorted(os.listdir(gt_clip_path)):
+                    stem, extension = os.path.splitext(filename)
+                    if extension.lower() in {'.jpg', '.jpeg', '.png'}:
+                        gt_index.setdefault(stem, []).append(os.path.join(gt_clip_path, filename))
+                gt_paths = []
+                for filename in frames:
+                    exact_path = os.path.join(gt_clip_path, filename)
+                    candidates = gt_index.get(os.path.splitext(filename)[0], [])
+                    if os.path.isfile(exact_path):
+                        gt_paths.append(exact_path)
+                    elif len(candidates) == 1:
+                        gt_paths.append(candidates[0])
+                    elif not candidates:
+                        frame_path = os.path.join(clips_path, clip, filename)
+                        raise FileNotFoundError(f"Missing ground truth for frame {frame_path}; expected {exact_path}")
+                    else:
+                        frame_path = os.path.join(clips_path, clip, filename)
+                        raise ValueError(f"Ambiguous ground truth for frame {frame_path}: {', '.join(candidates)}")
                 for i in range(len(frames)):
                     if i >= 2:
                         path = os.path.join(self.frames_path, partidas, clip, frames[i])
@@ -42,16 +79,16 @@ class TracknetV2Dataset(Dataset):
                         path_preprev = os.path.join(self.frames_path, partidas, clip, frames[i-2])
 
 
-                        path_gt = os.path.join(self.gts_path, partidas, clip, frames[i])
-                        path_gt_prev = os.path.join(self.gts_path, partidas, clip, frames[i-1])
-                        path_gt_preprev = os.path.join(self.gts_path, partidas, clip, frames[i-2])
+                        path_gt = gt_paths[i]
+                        path_gt_prev = gt_paths[i-1]
+                        path_gt_preprev = gt_paths[i-2]
 
 
                         
 
-                        label_path = os.path.join(self.labels_path, partidas, clip, frames[i]).replace('.jpg', '.txt')
-                        label_path_prev = os.path.join(self.labels_path, partidas, clip, frames[i-1]).replace('.jpg', '.txt')
-                        label_path_preprev = os.path.join(self.labels_path, partidas, clip, frames[i-2]).replace('.jpg', '.txt')
+                        label_path = os.path.splitext(os.path.join(self.labels_path, partidas, clip, frames[i]))[0] + '.txt'
+                        label_path_prev = os.path.splitext(os.path.join(self.labels_path, partidas, clip, frames[i-1]))[0] + '.txt'
+                        label_path_preprev = os.path.splitext(os.path.join(self.labels_path, partidas, clip, frames[i-2]))[0] + '.txt'
                         
                         self.samples.append((path, path_prev, path_preprev, path_gt, path_gt_prev, path_gt_preprev, label_path, label_path_prev, label_path_preprev))
                 
@@ -119,17 +156,17 @@ class TracknetV2Dataset(Dataset):
         plt.tight_layout()
         plt.show()
     def get_output(self, path_gt, path_gt_prev, path_gt_preprev):
-        img = cv2.imread(path_gt, cv2.IMREAD_GRAYSCALE)
-        img_prev = cv2.imread(path_gt_prev, cv2.IMREAD_GRAYSCALE)
-        img_preprev = cv2.imread(path_gt_preprev, cv2.IMREAD_GRAYSCALE)
-
-        img = torch.from_numpy(img).unsqueeze(0).float() / 255.0  # Normalize to [0, 1]
-        img_prev = torch.from_numpy(img_prev).unsqueeze(0).float() / 255.0  # Normalize to [0, 1]
-        img_preprev = torch.from_numpy(img_preprev).unsqueeze(0).float() / 255.0  # Normalize to [0, 1]
-
-        y = torch.cat([img_preprev, img_prev, img], dim=0)  # (3, H, W)
-
-        return y
+        heatmaps = []
+        for gt_path in (path_gt_preprev, path_gt_prev, path_gt):
+            image = cv2.imread(gt_path, cv2.IMREAD_GRAYSCALE)
+            if image is None:
+                raise ValueError(f"Unable to read ground truth: {gt_path}")
+            if image.shape != (self.height, self.width):
+                raise ValueError(
+                    f"Ground truth {gt_path} has shape {image.shape}; expected {(self.height, self.width)}"
+                )
+            heatmaps.append(torch.from_numpy(image).unsqueeze(0).float() / 255.0)
+        return torch.cat(heatmaps, dim=0)
 
     def denormalize_9ch(self, tensor):
         """
@@ -157,21 +194,21 @@ class TracknetV2Dataset(Dataset):
 
         return torch.cat([img1, img2, img3], dim=0)
     def _get_label_data(self, label_path):
-        if not os.path.exists(label_path):
-            return 0, 0, 0  # Return default values if the label file doesn't exist
-
         with open(label_path, 'r') as f:
-            lines = f.readlines()
+            fields = f.readline().split()
 
-        if len(lines) == 0:
-            return 0, 0, 0  # Return default values if the label file is empty
+        if len(fields) != 3:
+            raise ValueError(f"Invalid label {label_path}: expected 'x y vis' on the first line")
+        try:
+            x_pos, y_pos = float(fields[0]), float(fields[1])
+            vis = int(fields[2])
+        except ValueError as exc:
+            raise ValueError(f"Invalid label {label_path}: x/y must be numbers and vis an integer") from exc
+        if not np.isfinite([x_pos, y_pos]).all():
+            raise ValueError(f"Invalid label {label_path}: x/y must be finite")
 
-        lines = lines[0].strip().split()
-
-        x_pos = (float(lines[0]) * self.width)/ self.original_width 
-        y_pos = (float(lines[1]) * self.height)/ self.original_height 
-        vis = int(lines[2]) 
-
+        x_pos = (x_pos * self.width) / self.original_width
+        y_pos = (y_pos * self.height) / self.original_height
 
         return x_pos, y_pos, vis
 
@@ -184,27 +221,11 @@ class TracknetV2Dataset(Dataset):
 
         
     def get_input(self, path, path_prev, path_preprev):
-
-        img = cv2.imread(path)
-        img_prev = cv2.imread(path_prev)
-        img_preprev = cv2.imread(path_preprev)
-
-            # BGR -> RGB
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        img_prev = cv2.cvtColor(img_prev, cv2.COLOR_BGR2RGB)
-        img_preprev = cv2.cvtColor(img_preprev, cv2.COLOR_BGR2RGB)
-
-        img = self.transformation(img)
-        img_prev = self.transformation(img_prev)
-        img_preprev = self.transformation(img_preprev)
-
-        img = self.normalize(img)
-        img_prev = self.normalize(img_prev)
-        img_preprev = self.normalize(img_preprev)
-
-
-        imgs = torch.cat([img_preprev, img_prev, img], dim=0)  # (9, H, W)
-        
-        return imgs
-
-        
+        frames = []
+        for frame_path in (path_preprev, path_prev, path):
+            image = cv2.imread(frame_path)
+            if image is None:
+                raise ValueError(f"Unable to read frame: {frame_path}")
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            frames.append(self.normalize(self.transformation(image)))
+        return torch.cat(frames, dim=0)
