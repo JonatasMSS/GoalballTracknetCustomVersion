@@ -1,113 +1,94 @@
 # Tracknet Goalball
 
-## Overview
-**Tracknet Goalball** is a unified framework designed for training and evaluating ball-tracking models on goalball datasets. This project brings together **TrackNet V1** and **TrackNet V2** architectures into a single repository, providing a unified and consistent environment for researchers, developers, and sports analysts to experiment with ball-tracking in the context of goalball.
+Python/PyTorch implementations of TrackNet V1 and V2 for ball tracking in goalball videos.
+The versions have different input, target and checkpoint contracts; their weights are not interchangeable.
 
-By unifying both versions, this project makes it easier to compare performance, share dataset pipelines, and eventually deploy inference for match analysis.
+## Environment
 
----
+Use a virtual environment and install the project dependencies:
 
-## 🛠️ Environment Setup
+```powershell
+pip install -r requirements.txt
+```
 
-It is highly recommended to use a virtual environment (e.g., `venv` or `conda`) to manage dependencies.
+V1 also imports `scipy`, which is not yet listed in `requirements.txt`.
+`torchsummary` is optional for V2's `show_model_summary()`; the notebook does not require it.
+V1 training selects CUDA explicitly; V2 and video inference select CPU/CUDA according to availability.
 
-1. **Clone the repository:**
-   ```bash
-   git clone <your-repo-url>
-   cd "Tracknet Goalball"
-   ```
+## V2 dataset contract
 
-2. **Install dependencies:**
-   The project requires PyTorch and other standard computer vision libraries. Install them via `pip`:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-*(Note: Depending on your hardware, you may want to install a specific version of PyTorch with CUDA support. Visit the [PyTorch website](https://pytorch.org/) for instructions.)*
-
----
-
-## 📂 Dataset Structure
-
-The models expect the goalball dataset to be located in the `assets/dataset` directory. Ensure your dataset is structured as follows before beginning training:
+Use separate training and validation roots, each with this hierarchy:
 
 ```text
-Tracknet Goalball/
-└── assets/
-    └── dataset/
-        ├── frames_out/   # Extracted video frames (.jpg or .png)
-        ├── gts/          # Ground truth heatmaps/data
-        └── labels/       # CSV or text files containing (x, y) coordinates
+assets/train/
+  frames_out/<partida>/<clip>/frame1.jpg
+  gts/<partida>/<clip>/frame1.png
+  labels/<partida>/<clip>/frame1.txt
+assets/val/
+  ... same hierarchy, independent matches/clips ...
 ```
 
----
+- Each label's first line must contain exactly `x y vis`: finite pixel coordinates in the original resolution and integer visibility. Set `--original_width`/`--original_height` to that resolution (defaults: 1920/1080). Missing, empty or malformed labels raise errors. Visibility `0` must be explicitly annotated; evaluation treats only `vis == 1` as visible.
+- GTs are grayscale heatmaps already at the model input size (default: height 360, width 640). They are not resized automatically. The exact frame filename is preferred; otherwise a unique JPG/JPEG/PNG with the same stem is accepted. Missing or ambiguous matches raise errors.
+- Frames use natural numeric ordering (`frame1`, `frame2`, `frame10`), with filename tie-breaking. Windows stay inside each clip; numeric gaps are allowed. Clips shorter than three frames create no samples; empty training/validation datasets are rejected.
+- Original dimensions must be positive and finite; model input dimensions must be positive multiples of 8. Image readability and GT shape are checked when a sample is read.
 
-## 🚀 Training
+Split by independent matches/clips and check actual frame overlap. Different directory paths alone do not establish independence.
 
-You can train either TrackNet V1 or V2 using the provided training scripts. Both scripts use similar argument structures.
+## Training
 
-### Training TrackNet V1
-```bash
-python trainV1.py \
-    --batch_size 2 \
-    --num_epochs 500 \
-    --lr 1e-4 \
-    --dataset_path assets/dataset \
-    --exps_path exps \
-    --exp_id run_v1_01
+### TrackNet V1
+
+```powershell
+python trainV1.py --train_path assets/train --val_path assets/val --exps_path exps --exp_id run_v1_01
 ```
 
-### Training TrackNet V2
-TrackNet V2 adds support for DataParallel (multiple GPUs).
-```bash
-python trainV2.py \
-    --batch_size 4 \
-    --num_epochs 50 \
-    --lr 1e-4 \
-    --dataset_path assets/dataset \
-    --exps_path exps \
-    --logs_path runs/logs \
-    --parallel True
+### TrackNet V2
+
+```powershell
+python trainV2.py --train_dataset_path assets/train --val_dataset_path assets/val --num_epochs 10 --val_intervals 2 --exps_path exps/run_v2_01 --logs_path runs/run_v2_01
 ```
 
-**Key Arguments:**
-- `--batch_size`: Number of samples per batch.
-- `--num_epochs`: Total epochs for training.
-- `--model_path`: (Optional) Path to a pre-trained `.pt` or `.pth` weight file to resume training.
+Add `--parallel` to request DataParallel; it is a flag without a `True` value.
+Use positive `--num_epochs` and `--val_intervals`. Validation runs every interval and on the final epoch: the example evaluates epochs 2, 4, 6, 8 and 10. The first finite F1 saves `best_model.pth`, including F1 zero; later saves require improvement. `last_model.pth` is saved each epoch. Existing best/last checkpoint paths stop startup: choose a new `--exps_path`.
 
----
+Optional `--model_path` initializes only the model `state_dict`. It does **not** resume optimizer, scheduler, epoch or best F1; those restart. Use a new output experiment directory even when initializing from previous weights.
 
-## 🎥 Inference & Prediction
+V2 epoch losses are weighted by sample count, including the final partial batch. Validation uses one logits forward per batch and derives probabilities with sigmoid. Its metrics aggregate all three temporal channels from overlapping windows; video inference uses only the current channel. A visible prediction outside the distance tolerance counts as FP without an additional FN. Document this protocol when comparing results.
 
-Once you have a trained model, you can run inference on videos to visualize the ball tracking.
+## Video inference
 
-### Inference with TrackNet V1
-Use `inference_video.py` to run predictions using a TrackNet V1 trained model.
-```bash
-python inference_video.py --video_path path/to/video.mp4 --model_path exps/run_v1_01/model_best.pt
-```
-*(Check the script for additional arguments like output video path)*
+### TrackNet V1
 
-### Inference with TrackNet V2
-Use `predictV2.py` for TrackNet V2 inference.
-```bash
-python predictV2.py --video_path path/to/video.mp4 --model_path exps/best_model.pth
+```powershell
+python inference_video.py --video_paths input.mp4 --model_path exps/run_v1_01/model_best.pt --output_path output_v1.mp4
 ```
 
----
+`--video_paths` accepts one to four input videos.
 
-## 📈 TensorBoard Logging
-Training metrics (Loss, Precision, Recall, F1-Score) are logged automatically. You can view them using TensorBoard:
+### TrackNet V2
 
-```bash
-# For V1
-tensorboard --logdir exps/run_v1_01/plots
-
-# For V2
-tensorboard --logdir runs/logs
+```powershell
+python predictV2.py --video_path input.mp4 --model_path exps/run_v2_01/best_model.pth --video_out output_v2.mp4
 ```
 
----
+Input and output must refer to different files. Processing reads until EOF; declared frame count controls only progress. Invalid FPS falls back to 30, invalid video dimensions raise an error, and capture/writer resources are released on failure. Temporal inputs retain clean frames before annotations are drawn.
 
-## 🤝 Contributing
-Contributions are welcome! If you find a bug or have a feature request, please open an issue or submit a pull request.
+V2 inference uses the same RGB, PIL bilinear resizing and ImageNet normalization as the dataset. `--input_width`/`--input_height` must be positive multiples of 8, `--threshold` must be in [0, 1], and `--trail_length` can be zero or positive. Hough parameters and evaluation tolerance still require calibration for the data.
+
+## Notebook and visualization
+
+[Notebooks/Trackv2.ipynb](Notebooks/Trackv2.ipynb) imports the current model, dataset, loss and validation. Configure the dataset, original/input dimensions and an explicit checkpoint before predicting or validating. It does not train a model.
+
+V2 helpers in [utils/helpers.py](utils/helpers.py) pair the central RGB frame with its central GT/probability map. They preserve inputs and explicit output mode; denormalization returns a copy. Batch visualization accepts a pair or triple, limits the first batch and returns a grid without displaying it automatically.
+
+## Checks and logs
+
+```powershell
+python -B -m unittest discover -s tests -v
+python trainV2.py --help
+python predictV2.py --help
+tensorboard --logdir runs/run_v2_01
+```
+
+For V1 TensorBoard logs, use `exps/run_v1_01/plots`. Tests use synthetic fixtures; tracking quality on real matches requires separate evaluation.
