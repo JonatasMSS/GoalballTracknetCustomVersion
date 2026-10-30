@@ -12,17 +12,21 @@ Não corrija problemas encontrados fora do escopo sem uma tarefa que inclua a co
 
 | Fluxo | Entrada | Implementação |
 | --- | --- | --- |
-| Treino V1 | `trainV1.py` | `models/TracknetV1.py::BallTrackerNet`, `datasets/TracknetV1Dataset.py`, `utils/TracknetV1/train_val.py` |
-| Treino V2 | `trainV2.py` | `models/TracknetV2.py::TrackentV2`, `datasets/TracknetV2Dataset.py`, `utils/TracknetV2/loss.py`, `utils/TracknetV2/train_val.py` |
-| Inferência V1 | `inference_video.py` | `get_input_tensor`, `postprocess`, `main`; aceita de 1 a 4 vídeos |
-| Inferência V2 | `predictV2.py` | `preprocess_frame`, `build_input`, `draw_trajectory`; usa o canal 2 da saída |
-| Testes | `tests/` | `unittest`: dataset, treino, validação, inferência e helpers V2 com fixtures sintéticas |
+| Lançador | `train.py`, `config.yaml` | `load_config()` valida/resolve o perfil ativo; importa somente `<modelo>.train` e chama `run_training(config)` |
+| Treino V1 | `tracknet_v1/train.py::run_training` | `tracknet_v1/model.py::BallTrackerNet`, `tracknet_v1/dataset.py`, `tracknet_v1/train_val.py` |
+| Treino V2 | `tracknet_v2/train.py::run_training` | `tracknet_v2/model.py::TrackentV2`, `tracknet_v2/dataset.py`, `tracknet_v2/loss.py`, `tracknet_v2/train_val.py` |
+| Inferência V1 | `python -m tracknet_v1.infer` | `get_input_tensor`, `postprocess`, `main`; aceita de 1 a 4 vídeos |
+| Inferência V2 | `python -m tracknet_v2.infer` | `preprocess_frame`, `build_input`, `draw_trajectory`; usa o canal 2 da saída |
+| Testes | `tests/` | `unittest`: lançador YAML, contratos V1 e dataset/treino/validação/inferência/helpers V2 com fixtures sintéticas |
 
-`Notebooks/Trackv2.ipynb` importa os módulos atuais e exige checkpoint antes de prever
-ou validar. `utils/helpers.py` visualiza o frame/heatmap central da V2, preservando
-inputs e modo explícito; a desnormalização devolve uma cópia. `utils/Metrics/ModelMetrics.py`
-é apenas um esqueleto. `relatorio V2.md` preserva a análise histórica e registra as
-correções posteriores; não substitui o código atual.
+`tracknet_v2/notebooks/Trackv2.ipynb` localiza a raiz pelos ancestrais, importa os módulos
+atuais e exige checkpoint antes de prever ou validar; o dataset padrão é
+`dataset/tracknet_v2/val`. `tracknet_v2/helpers.py` visualiza frame/heatmap centrais,
+preservando inputs e modo explícito; a desnormalização devolve uma cópia.
+`dataset/` contém somente dados/instruções, incluindo exemplos e quatro templates vazios;
+as classes ficam nos módulos `tracknet_v1/dataset.py` e `tracknet_v2/dataset.py`.
+`docs/relatorio V2.md` preserva a análise histórica e registra correções/migração;
+não substitui o código atual. Scripts e pacotes antigos foram removidos, sem wrappers.
 
 ## Contratos que precisam permanecer alinhados
 
@@ -55,11 +59,11 @@ correções posteriores; não substitui o código atual.
   coincidir com a resolução de entrada. A V2 prefere GT de nome exato, com fallback
   único por nome-base em JPG/JPEG/PNG; ausência ou ambiguidade gera erro. Ela usa ordem
   natural numérica com desempate pelo nome, sem exigir IDs consecutivos; V1 usa
-  `os.listdir` sem ordenar. Labels ausentes ou inválidos geram erro, não ausência da bola.
+  `os.listdir` sem ordenar. Na V2, labels ausentes ou inválidos geram erro, não ausência da bola.
   O construtor indexa nomes; leitura das imagens e tamanho dos GTs são verificados no acesso à amostra.
 - Separe avaliação por partidas ou clipes independentes e confira sobreposição real.
-  Janelas compartilham frames: `random_split` da V1 e caminhos distintos na V2 não
-  garantem independência entre treino e validação.
+  Ambos os treinos exigem diretórios explícitos e distintos; a V1 não usa `random_split`.
+  Janelas compartilham frames e caminhos distintos não garantem independência dos conjuntos.
 - A validação V2 agrega os três canais de janelas sobrepostas; a inferência usa só o
   atual. Ela conta localização fora de `max_distance` como FP, sem FN adicional.
   Preserve/documente o protocolo ao comparar métricas; não altere sua definição silenciosamente.
@@ -69,10 +73,24 @@ correções posteriores; não substitui o código atual.
 
 ## Execução e validação
 
-Dependências estão em `requirements.txt`; use o ambiente do projeto quando disponível.
-O fluxo V1 também importa `scipy`, ainda ausente dessa lista; `torchsummary` é opcional
-somente em `show_model_summary()` da V2, não no notebook. Não instale pacotes para uma análise documental.
-O treino V1 fixa CUDA; V2 e os scripts de inferência escolhem CPU/CUDA conforme disponibilidade.
+Dependências estão em `requirements.txt`, incluindo PyYAML; use o ambiente do projeto.
+A V1 usa `math.dist`, sem SciPy. `torchsummary` é opcional somente em
+`show_model_summary()` da V2, não no notebook. Não instale pacotes para análise documental.
+
+Treino usa somente `train.py` + YAML. A raiz exige `model` e `models`, com IDs
+`tracknet_v1`/`tracknet_v2`; valide todos os campos obrigatórios e rejeite desconhecidos
+no perfil ativo. Conteúdo de perfil inativo é ignorado, mas IDs desconhecidos em `models`
+são rejeitados. Preserve os nomes e valores de referência em `config.yaml`; consulte
+o README para os campos/tipos. Inteiros são positivos e não aceitam booleanos;
+`lr`/`stepper_gamma` são positivos/finitos, `parallel` é booleano e `exp_id` é um nome simples.
+`load_config()` resolve caminhos relativos ao YAML, aceita absolutos e verifica entradas,
+checkpoint e saídas/ancestrais ocupados por arquivos antes de importar o treino escolhido.
+As APIs `run_training(config)` recebem o dicionário completo do perfil, sem argparse,
+monkeypatch de `sys.argv` ou subprocesso. Os `__init__.py` dos pacotes permanecem leves.
+
+Ambos os treinos aceitam `device: auto/cpu/cuda`; CUDA indisponível é erro antes de
+artefatos. `parallel: true` na V2 só envolve DataParallel em CUDA com múltiplas GPUs.
+Preserve os flags dos módulos de inferência; eles têm CLI própria.
 
 Verificação de regressão existente, sem dados reais:
 
@@ -85,32 +103,39 @@ Para lógica nova não trivial, acrescente um teste pequeno ou uma autoverifica�
 asserts; para documentação, confira referências, argumentos e sintaxe das configurações.
 Se faltarem dependências, relate a falha de importação: análise de sintaxe não equivale a testes passando.
 
-Consulte as CLIs reais com `python <script>.py --help` quando as dependências estiverem
-disponíveis; esses comandos importam bibliotecas antes de exibir ajuda. Exemplos de
-argumentos atuais (treino/inferência só quando fizerem parte da tarefa):
+Consulte as CLIs reais quando as dependências estiverem disponíveis. A ajuda do lançador
+importa PyYAML, sem PyTorch; os módulos de inferência importam suas bibliotecas.
+Exemplos atuais (treino/inferência só quando fizerem parte da tarefa):
 
 ```powershell
-python trainV1.py --train_path assets/train --val_path assets/val --exp_id run_v1_01
-python trainV2.py --train_dataset_path assets/train --val_dataset_path assets/val --exps_path exps/run_v2_01 --logs_path runs/run_v2_01
-python inference_video.py --video_paths entrada.mp4 --model_path exps/run_v1_01/model_best.pt --output_path saida_v1.mp4
-python predictV2.py --video_path entrada.mp4 --model_path exps/run_v2_01/best_model.pth --video_out saida_v2.mp4
+python train.py --help
+python train.py --config config.yaml
+python -m tracknet_v1.infer --video_paths entrada.mp4 --model_path runs/tracknet_v1/default/model_best.pt
+python -m tracknet_v2.infer --video_path entrada.mp4 --model_path runs/tracknet_v2/default/weights/best_model.pth
 ```
 
-No treino V2, valide diretórios e datasets não vazios antes de criar artefatos. A agenda
+Nos dois treinos, valide diretórios e datasets não vazios antes de criar artefatos. Na V2, a agenda
 usa épocas humanas e avalia também a última; salva o primeiro F1 finito, inclusive zero,
 e depois apenas melhorias. As losses de época são ponderadas pelo número de amostras.
 Na inferência V2, a leitura segue até EOF; a contagem declarada serve apenas ao progresso.
 Captura e writer são liberados em caso de erro. Consulte o README e as CLIs para os argumentos atuais.
 
+A V1 mantém Adam, agenda legada (10 épocas/intervalo 2 valida em 3,5,7,9), sem validação
+final obrigatória, best somente acima do melhor F1 inicial zero e last nas validações.
+Sua parada de batches permite até `steps_per_epoch + 1`; não corrija isso silenciosamente
+numa reorganização. Preserve as calibrações próprias de treino/inferência em 640×360.
+Outputs padrão ficam em `runs/<modelo>/`; logs V1 em `default/plots`, V2 em `default/logs`.
+
 ## Preservação de trabalho e artefatos
 
 - Confira `git status` e preserve alterações locais, relatórios, datasets e pesos.
-- Os checkpoints atuais salvam apenas pesos; `--model_path` não retoma otimizador,
+- Os checkpoints atuais salvam apenas pesos; `model_path` não retoma otimizador,
   scheduler, época ou melhor métrica. Pesos V1 e V2 não são intercambiáveis.
-- A V2 rejeita `--exps_path` com `best_model.pth` ou `last_model.pth` já existente.
+- A V2 rejeita `exps_path` com `best_model.pth` ou `last_model.pth` já existente.
   Inicialização por pesos exige um novo diretório de saída; não implemente resume completo sem tarefa específica.
 - Use diretórios de experimento e vídeos de saída novos para evitar sobrescritas.
-  `.gitignore` não exclui `exps/` nem todos os vídeos; não adicione artefatos gerados ao Git.
+  `runs/`, bytecode e os quatro conjuntos de `dataset/` são ignorados pelo Git;
+  exemplos e `.gitkeep` são versionados. Caminhos customizados exigem a mesma atenção.
 - Não inicie treino longo, downloads ou processamento de vídeos só para validar uma
   alteração documental. Preserve calibrações e validações existentes em correções.
 
@@ -139,3 +164,5 @@ e informe a limitação. Consulte a [documentação oficial](https://learn.chatg
 
 Ao entregar, informe mudanças, verificações executadas, resultados e limites. Distinga
 análise estática, testes sintéticos e experimentos reais; nunca invente resultados.
+
+Mapa e instruções atualizados em 30/10/2026.

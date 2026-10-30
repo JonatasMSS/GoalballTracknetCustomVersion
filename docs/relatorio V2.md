@@ -90,3 +90,55 @@ README, instruções para agentes e ajuda de `--model_path` foram atualizados. A
 A arquitetura, os formatos dos pesos, a loss existente, a seleção do canal atual na inferência, a regra `vis == 1` e a classificação de erro de localização como FP permanecem preservados. A loss não foi substituída nem declarada reprodução exata da WBCE original para heatmaps suaves. Parâmetros de Hough e tolerância não foram recalibrados.
 
 Não foram avaliados jogos reais, generalização, treinamento longo ou execução em GPU. Independência dos splits e qualidade das anotações reais ainda dependem dos dados; os resultados sintéticos não estabelecem acurácia, convergência ou ganhos de desempenho.
+
+
+---
+
+## Reorganização modular em 30/10/2026
+
+O texto anterior, inclusive o status de 29/10, foi preservado integralmente. Seus caminhos e números de linha são referências históricas aos arquivos daqueles commits; os destinos atuais estão no mapa abaixo. O prefixo histórico preservado tem SHA256 `6d15e7b5704463f79a0f33737bafed5b9cffec9fbcd00e7651bc1ef987302476`.
+
+| Origem histórica | Destino atual |
+| --- | --- |
+| `models/TracknetV1.py` | [tracknet_v1/model.py](../tracknet_v1/model.py) |
+| `models/TracknetV2.py` | [tracknet_v2/model.py](../tracknet_v2/model.py) |
+| `datasets/TracknetV1Dataset.py` | [tracknet_v1/dataset.py](../tracknet_v1/dataset.py) |
+| `datasets/TracknetV2Dataset.py` | [tracknet_v2/dataset.py](../tracknet_v2/dataset.py) |
+| `utils/TracknetV1/train_val.py` | [tracknet_v1/train_val.py](../tracknet_v1/train_val.py) |
+| `utils/TracknetV2/train_val.py` | [tracknet_v2/train_val.py](../tracknet_v2/train_val.py) |
+| `utils/TracknetV2/loss.py` | [tracknet_v2/loss.py](../tracknet_v2/loss.py) |
+| `utils/helpers.py` | [tracknet_v2/helpers.py](../tracknet_v2/helpers.py) |
+| `trainV1.py`, `trainV2.py` | [train.py](../train.py) + [config.yaml](../config.yaml), chamando as APIs `tracknet_v1.train.run_training` e `tracknet_v2.train.run_training` |
+| `inference_video.py`, `predictV2.py` | [tracknet_v1/infer.py](../tracknet_v1/infer.py), [tracknet_v2/infer.py](../tracknet_v2/infer.py), executados com `python -m` |
+| `Notebooks/Trackv2.ipynb` | [tracknet_v2/notebooks/Trackv2.ipynb](../tracknet_v2/notebooks/Trackv2.ipynb) |
+| Exemplos em `Notebooks/` | [dataset/examples/img000007.jpg](../dataset/examples/img000007.jpg), [dataset/examples/img000007.txt](../dataset/examples/img000007.txt), sem alteração de bytes |
+
+### Etapas e verificações
+
+| Etapa | Evidência |
+| --- | --- |
+| 1. Baseline, commit `e49fb381f8065e941ae947fe6ef235c6554874a7` | Fora do repositório: pesos V1/V2, input/saídas, manifestos e contrato aprovado. Strict load em segunda instância e paridade bit a bit em CPU. Suíte: 51 testes, 47 passaram e 4 skips. |
+| 2. Pacote V2 | API nativa `run_training(config)`, seleção de device e inferência modular; strict load de 121 chaves e logits/probabilidades idênticos ao baseline. Modelo, dataset, loss, validação e helpers preservados em bytes. Notebook: sete células com sintaxe válida; imports/configuração conferidos da raiz e de sua nova pasta. Suíte: 54 testes, 50 passaram e 4 skips. |
+| 3. Pacote V1 | Splits explícitos sem `random_split`, seleção de device e `math.dist` substituindo SciPy. Arquitetura/dataset preservados em bytes; strict load de 126 chaves e saída idêntica ao baseline. Agenda, checkpoints, Adam, limite legado de batches e calibrações de treino/inferência mantidos. Suíte: 65 testes, 61 passaram e 4 skips. |
+| 4. Lançador YAML | `safe_load`, validação do perfil ativo, caminhos relativos ao YAML e dispatch apenas do módulo escolhido, sem importar PyTorch ao importar o lançador. Casos de paths com espaços/outro CWD, tipos/ranges, artefatos e erros CLI verificados. Suíte: 79 testes, 75 passaram e 4 skips. |
+| 5. Estrutura e documentação | Exemplos movidos com SHA256 preservado, quatro templates vazios, dados/resultados/bytecode ignorados e fontes legadas já migradas removidas sem wrappers. Removidos seis bytecodes, inicializadores antigos e o esqueleto Metrics não utilizado; pastas removidas somente quando vazias. |
+| 6. Integração final após reorganização | Concluída em CPU: suíte final de 79 testes (75 passaram, 4 skips), paridade dos dois modelos, três CLIs, controlador V1 com classificador simulado, componentes V2 reais, inferência real e notebook nos dois diretórios; detalhes e limites abaixo. |
+
+As suítes foram executadas em CPU com `python -B -m unittest discover -s tests -q`; os quatro skips explícitos correspondem às restrições de hardlink/symlink do Windows. Testes V1 agora também exercitam código legado que emite dois avisos `torch.tensor(tensor)`; esse comportamento não foi alterado.
+
+Os perfis completos e os defaults estão em `config.yaml`. `model_path` continua inicializando somente pesos; não foi criado resume. Saídas padrão estão centralizadas em `runs/<modelo>/`. Treino V1 mantém validação nas épocas humanas 3,5,7,9 para 10 épocas/intervalo 2, sem final obrigatório; V2 mantém intervalos humanos e a última época.
+
+Nenhum dataset ou peso real foi movido ou copiado. Os exemplos mantêm SHA256 `332f7b786f6c467c9223aa4c98306c8fbe3be08a17c74a0e1c2bcba24fab0b39` (JPG) e `e56f1f5d39e20a7db08e84ec5a51ca0e5c3fbae03bb490af7615398cda28c3b8` (TXT). Não houve avaliação em partidas reais, treino longo, GPU ou recalibração científica nesta reorganização.
+
+
+### Evidências finais da etapa 6
+
+A suíte foi repetida após a limpeza com `python -B -m unittest discover -s tests -q`: 79 testes, 75 passaram e quatro skips explícitos, sem falhas. Os dois avisos legados da V1 permaneceram. O script externo `run_tracknet_integration.py` terminou com código zero; `tracknet-reorganization-integration-20261030/results.json` e os logs desse diretório registram a execução em CPU, seed `20261029`, com dados e artefatos sintéticos fora do repositório.
+
+- **Pesos e CLIs:** strict load de 126 chaves V1 e 121 chaves V2, sem chaves ausentes ou inesperadas; saída V1 e logits/probabilidades V2 idênticos bit a bit ao baseline. As ajudas de `train.py`, `tracknet_v1.infer` e `tracknet_v2.infer` terminaram com código zero.
+- **Controlador V1:** lançador YAML com caminhos relativos e espaços, dataset, loaders, loops de treino/validação, CrossEntropy e Adam reais em `[1,9,360,640]`, durante três épocas. Somente o classificador foi substituído por um módulo mínimo simulado. Seus parâmetros mudaram e `model_last.pt` foi salvo; F1 zero não criou best, conforme a regra legada. Isso verifica o controlador, sem representar treino da arquitetura V1 completa.
+- **Componentes V2:** dataset sintético com duas janelas, arquitetura TrackentV2 real em `[2,9,16,16]`, `wbce_loss`, backward, um passo AdamW com alteração dos pesos, validação/Hough reais com valores finitos e gravação/recarregamento estrito do checkpoint. A execução usou as APIs de componentes; não foi um treino completo pelo lançador YAML na resolução padrão 640×360.
+- **Vídeos:** inferências pelas duas CLIs com arquiteturas reais e MP4 decodificado. V1 processou um frame em entrada 640×360, solicitado por `--max_seconds 0.25` no vídeo de 4 FPS; V2 processou quatro frames em entrada 16×16 até EOF. O SHA256 do vídeo de origem permaneceu igual.
+- **Notebook:** as sete células de código completas foram executadas da raiz e de `tracknet_v2/notebooks`, com o checkpoint V2 sintético carregado. Cada execução produziu dois grids RGB e validação com valores finitos, sem alterar o notebook no disco.
+
+Os fixtures usam ausência de bola anotada; losses/métricas finitas demonstram execução, não qualidade de localização. Os smokes não equivalem a treinamento completo das duas arquiteturas em 640×360, nem avaliam partidas reais, generalização, convergência, latência ou GPU. Loss, calibrações e protocolo de métricas continuam preservados.
