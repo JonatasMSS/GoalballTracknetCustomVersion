@@ -1,0 +1,31 @@
+model: tracknet_v2
+
+models:
+  tracknet_v1:
+    batch_size: 2
+    exp_id: default
+    num_epochs: 500
+    lr: 0.0001
+    val_intervals: 2
+    steps_per_epoch: 200
+    exps_path: runs/tracknet_v1
+    train_path: dataset/tracknet_v1/train
+    val_path: dataset/tracknet_v1/val
+    model_path: null
+    device: auto
+
+  tracknet_v2:
+    batch_size: 4
+    num_epochs: 10
+    lr: 0.0001
+    stepper_gamma: 0.1
+    val_intervals: 2
+    exps_path: runs/tracknet_v2/default/weights
+    logs_path: runs/tracknet_v2/default/logs
+    train_dataset_path: dataset/tracknet_v2/train
+    val_dataset_path: dataset/tracknet_v2/val
+    original_width: 1920
+    original_height: 1080
+    model_path: null
+    parallel: false
+    device: auto
