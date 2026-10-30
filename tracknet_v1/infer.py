@@ -1,12 +1,13 @@
 import argparse
 import os
+from pathlib import Path
 import cv2
 import torch
 import numpy as np
 from collections import deque
 from tqdm import tqdm
 
-from models.TracknetV1 import BallTrackerNet
+from .model import BallTrackerNet
 
 def get_input_tensor(img, img_prev, img_preprev):
     """
@@ -44,7 +45,7 @@ def main():
     parser = argparse.ArgumentParser(description="Run TrackNetV1 inference on a video.")
     parser.add_argument('--video_paths', nargs='+', type=str, required=True, help='Path to one or more input videos (max 4).')
     parser.add_argument('--model_path', type=str, required=True, help='Path to the trained model (.pt file).')
-    parser.add_argument('--output_path', type=str, default='output.mp4', help='Path to save the output video.')
+    parser.add_argument('--output_path', type=str, default=str(Path(__file__).resolve().parents[1] / 'runs' / 'tracknet_v1' / 'inference' / 'output.mp4'), help='Path to save the output video.')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu', help='Device to run inference on (cuda/cpu).')
     parser.add_argument('--trail_length', type=int, default=7, help='Length of the ball trajectory trail.')
     parser.add_argument('--start_time', type=float, default=0.0, help='Time in seconds to start processing from.')
@@ -97,6 +98,7 @@ def main():
         total_frames = min(total_frames, max_frames_from_seconds)
 
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    os.makedirs(os.path.dirname(args.output_path) or '.', exist_ok=True)
     out_video = cv2.VideoWriter(args.output_path, fourcc, fps, (original_width, original_height))
 
     # Buffers and trails for each video

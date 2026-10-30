@@ -3,11 +3,11 @@ import time
 import numpy as np
 import torch.nn as nn
 import cv2
-from scipy.spatial import distance
+import math
 import matplotlib.pyplot as plt
 
-from datasets.TracknetV1Dataset import TracknetV1Dataset
-from models.TracknetV1 import BallTrackerNet
+from .dataset import TracknetV1Dataset
+from .model import BallTrackerNet
 
 
 
@@ -69,7 +69,7 @@ def validate(model, val_loader, device, epoch, min_dist=30):
                 vis = batch[4][i]
                 if x_pred:
                     if vis != 0:
-                        dst = distance.euclidean((x_pred, y_pred), (x_gt, y_gt))
+                        dst = math.dist((x_pred, y_pred), (x_gt, y_gt))
                         if dst < min_dist:
                             tp[vis] += 1
                         else:
