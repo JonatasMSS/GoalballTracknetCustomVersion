@@ -6,8 +6,8 @@ import cv2
 import numpy as np
 import torch
 
-from datasets.TracknetV2Dataset import TracknetV2Dataset
-from predictV2 import build_input
+from tracknet_v2.dataset import TracknetV2Dataset
+from tracknet_v2.infer import build_input
 
 
 class TracknetV2DatasetTests(unittest.TestCase):

@@ -3,14 +3,15 @@ import argparse
 from collections import deque
 import math
 import os
+from pathlib import Path
 
 import cv2
 import torch
 from torchvision.transforms import InterpolationMode, functional as TF
 from tqdm import tqdm
 
-from models.TracknetV2 import TrackentV2
-from utils.TracknetV2.train_val import postprocessing
+from .model import TrackentV2
+from .train_val import postprocessing
 
 def preprocess_frame(frame, input_size, device, mean, std):
     """Resize and normalize a BGR frame to match training preprocessing."""
@@ -38,7 +39,7 @@ def main():
     parser = argparse.ArgumentParser(description="TrackNet V2 Prediction")
     parser.add_argument("--model_path", type=str, required=True, help="Path to a pre-trained model")
     parser.add_argument("--video_path", type=str, required=True, help="Path to input video")
-    parser.add_argument("--video_out", type=str, default="output_video.mp4", help="Path to save output video")
+    parser.add_argument("--video_out", type=str, default=str(Path(__file__).resolve().parents[1] / "runs" / "tracknet_v2" / "inference" / "output_video.mp4"), help="Path to save output video")
     parser.add_argument("--input_width", type=int, default=640, help="Model input width")
     parser.add_argument("--input_height", type=int, default=360, help="Model input height")
     parser.add_argument("--threshold", type=float, default=0.5, help="Ball probability threshold (0-1)")

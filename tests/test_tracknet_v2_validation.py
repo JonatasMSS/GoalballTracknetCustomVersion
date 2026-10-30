@@ -7,8 +7,8 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
-from models.TracknetV2 import TrackentV2
-from utils.TracknetV2.train_val import train, validate
+from tracknet_v2.model import TrackentV2
+from tracknet_v2.train_val import train, validate
 
 
 class _ModeModel(nn.Module):
@@ -56,7 +56,7 @@ class TracknetV2ValidationTests(unittest.TestCase):
         with (
             patch.object(model, "forward", wraps=model.forward) as forward,
             patch.object(criterion, "forward", wraps=criterion.forward) as criterion_forward,
-            patch("utils.TracknetV2.train_val.postprocessing", return_value=None) as postprocess,
+            patch("tracknet_v2.train_val.postprocessing", return_value=None) as postprocess,
             redirect_stdout(io.StringIO()),
         ):
             loss, precision, recall, f1 = validate(model, loader, criterion, "cpu")
@@ -90,7 +90,7 @@ class TracknetV2ValidationTests(unittest.TestCase):
         criterion = nn.MSELoss(reduction="mean")
         with (
             patch.object(model, "forward", wraps=model.forward) as forward,
-            patch("utils.TracknetV2.train_val.get_circle_center_hough", return_value=None),
+            patch("tracknet_v2.train_val.get_circle_center_hough", return_value=None),
             redirect_stdout(io.StringIO()),
         ):
             first_loss = train(model, loader, criterion, optimizer, "cpu")
@@ -130,7 +130,7 @@ class TracknetV2ValidationTests(unittest.TestCase):
                 model = _LossModel()
                 optimizer = torch.optim.SGD(model.parameters(), lr=0.0)
                 with (
-                    patch("utils.TracknetV2.train_val.get_circle_center_hough", return_value=None),
+                    patch("tracknet_v2.train_val.get_circle_center_hough", return_value=None),
                     redirect_stdout(io.StringIO()),
                 ):
                     train_loss = train(model, loader, criterion, optimizer, "cpu")
@@ -183,7 +183,7 @@ class TracknetV2ValidationTests(unittest.TestCase):
             seen_logits.append(logits)
             return logits.mean()
 
-        with patch("utils.TracknetV2.train_val.postprocessing", side_effect=centers):
+        with patch("tracknet_v2.train_val.postprocessing", side_effect=centers):
             loss, precision, recall, f1 = validate(
                 _ModeModel(),
                 [(inputs, targets, labels)],

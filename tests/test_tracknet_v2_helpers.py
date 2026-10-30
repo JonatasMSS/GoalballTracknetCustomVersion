@@ -3,7 +3,7 @@ import unittest
 import torch
 from torch import nn
 
-from utils.helpers import denormalize, make_prediction_grid, show_grid_batches
+from tracknet_v2.helpers import denormalize, make_prediction_grid, show_grid_batches
 
 
 class _TemporalModel(nn.Module):
