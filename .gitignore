@@ -1,5 +1,13 @@
 assets/*
 __pycache__/
+*.py[cod]
 runs/
 
-datasets/val
+/dataset/tracknet_v1/train/*
+!/dataset/tracknet_v1/train/.gitkeep
+/dataset/tracknet_v1/val/*
+!/dataset/tracknet_v1/val/.gitkeep
+/dataset/tracknet_v2/train/*
+!/dataset/tracknet_v2/train/.gitkeep
+/dataset/tracknet_v2/val/*
+!/dataset/tracknet_v2/val/.gitkeep
